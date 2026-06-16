@@ -1,14 +1,11 @@
-// Local dev token-helper backend for Stocker.
-//
-// In production this same functionality runs as Vercel serverless functions under
-// /api/* (see the api/ folder). Both share the exact same logic via api/_lib/paytm.js,
-// and both read/write the SAME Turso DB — so a login done on the deployed site is
-// instantly usable locally (via "copy stored token from DB"), and vice versa.
+// Standalone Express backend for Stocker (the "token helper" + Paytm REST proxy).
 //
 // Why a backend at all: Paytm's token exchange (request_token -> access tokens) can't
 // run in the browser — the endpoint blocks cross-origin calls and your api_secret must
 // never ship in frontend code. This server holds the secret, runs the exchange, persists
 // the session to Turso, and proxies Paytm's REST APIs using the server-side access_token.
+//
+// All shared Paytm + Turso logic lives in ./lib/paytm.js.
 
 import 'dotenv/config'
 import express from 'express'
@@ -22,9 +19,9 @@ import {
   exchangeRequestToken,
   clearTokens,
   paytmGet,
-} from '../api/_lib/paytm.js'
+} from './lib/paytm.js'
 
-const PORT = Number(process.env.PORT || 3000)
+const PORT = Number(process.env.PORT || 5174)
 const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:5173'
 
 if (!apiKey) {

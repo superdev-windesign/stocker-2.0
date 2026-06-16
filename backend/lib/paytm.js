@@ -1,7 +1,6 @@
-// Shared Paytm + Turso logic used by BOTH the Vercel serverless functions (api/*.js)
-// and the local Express dev server (server/index.js). Turso is the single source of
-// truth for the session, so serverless functions (which are stateless and ephemeral)
-// don't need an in-memory cache — every call reads the token straight from the DB.
+// Shared Paytm + Turso logic for the Stocker Express backend (backend/index.js).
+// Turso is the single source of truth for the session, so the server stays stateless —
+// every call reads the token straight from the DB rather than an in-memory cache.
 
 import { createClient } from '@libsql/client'
 

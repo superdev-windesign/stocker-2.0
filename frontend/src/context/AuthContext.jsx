@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useState } from 'react'
 
-// In production (Vercel) the API lives at the same origin under /api/*, so the base
-// URL is empty. Locally it's the Express dev server. An explicit VITE_BACKEND_URL wins.
+// The frontend talks to the standalone Express backend. Dev defaults to the local
+// backend on :5174; set VITE_BACKEND_URL to point at a deployed backend in production.
 const BACKEND_URL =
   import.meta.env.VITE_BACKEND_URL ?? (import.meta.env.DEV ? 'http://localhost:5174' : '')
 

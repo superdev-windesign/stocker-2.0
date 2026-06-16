@@ -2,32 +2,21 @@
   "name": "stocker",
   "private": true,
   "version": "0.1.0",
-  "type": "module",
+  "description": "Stocker — Paytm Money portfolio analytics + live market data. Monorepo: frontend/ (React+Vite) and backend/ (Express).",
+  "workspaces": [
+    "frontend",
+    "backend"
+  ],
   "scripts": {
-    "dev": "vite",
-    "server": "node server/index.js",
-    "start": "concurrently -n server,web -c magenta,cyan \"npm:server\" \"npm:dev\"",
-    "build": "vite build",
-    "preview": "vite preview"
-  },
-  "dependencies": {
-    "@libsql/client": "^0.17.3",
-    "cors": "^2.8.5",
-    "dotenv": "^16.4.5",
-    "express": "^4.19.2",
-    "lightweight-charts": "^4.2.1",
-    "papaparse": "^5.5.3",
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1",
-    "react-router-dom": "^7.17.0",
-    "recharts": "^3.8.1"
+    "dev": "concurrently -n backend,frontend -c magenta,cyan \"npm:dev:backend\" \"npm:dev:frontend\"",
+    "dev:backend": "npm --workspace backend run dev",
+    "dev:frontend": "npm --workspace frontend run dev",
+    "start": "npm run dev",
+    "server": "npm --workspace backend run start",
+    "build": "npm --workspace frontend run build",
+    "preview": "npm --workspace frontend run preview"
   },
   "devDependencies": {
-    "@vitejs/plugin-react": "^4.3.1",
-    "autoprefixer": "^10.4.19",
-    "concurrently": "^8.2.2",
-    "postcss": "^8.4.38",
-    "tailwindcss": "^3.4.4",
-    "vite": "^5.3.1"
+    "concurrently": "^8.2.2"
   }
 }

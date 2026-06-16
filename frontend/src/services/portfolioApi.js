@@ -1,5 +1,6 @@
-// Thin fetch wrappers around the backend /api/* proxy endpoints.
-// Same-origin in production (Vercel), local Express in dev; VITE_BACKEND_URL wins.
+// Thin fetch wrappers around the standalone Express backend's /api/* endpoints.
+// Dev defaults to the local backend on :5174; in production set VITE_BACKEND_URL
+// to the deployed backend's URL.
 const BACKEND_URL =
   import.meta.env.VITE_BACKEND_URL ?? (import.meta.env.DEV ? 'http://localhost:5174' : '')
 
