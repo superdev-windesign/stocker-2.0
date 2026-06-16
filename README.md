@@ -99,14 +99,30 @@ in again. `Logout` clears the stored session.
 
 ## Deploy
 
-The two workspaces deploy independently:
+The two workspaces deploy independently. **Deploy the backend first**, then point the frontend at it.
 
-- **Backend** — a long-running Node/Express service (Render, Railway, Fly.io, a VM, etc.). Set
-  `PAYTM_API_KEY`, `PAYTM_API_SECRET`, `TURSO_URL`, `TURSO_AUTH_TOKEN`, and `FRONTEND_URL` (the
-  deployed frontend origin, used for CORS). Run with `npm run server`.
-- **Frontend** — a static build (`npm run build` → `frontend/dist/`) on any static host (Vercel,
-  Netlify, Cloudflare Pages, …). Set `VITE_BACKEND_URL` to the deployed backend's URL at build time.
-- In the Paytm Developer Portal set the **Return URL** to the deployed **frontend** root.
+### Backend — Render (Node web service)
+
+A `render.yaml` blueprint is included. The Express server binds `process.env.PORT` (set by Render)
+and already sends CORS headers for `FRONTEND_URL`.
+
+1. Render Dashboard → **New → Blueprint** → connect this repo. Render reads `render.yaml`
+   (root directory `backend/`, `npm install` → `npm start`, health check `/health`).
+2. In the service's **Environment** tab, fill in the secrets: `PAYTM_API_KEY`, `PAYTM_API_SECRET`,
+   `TURSO_URL`, `TURSO_AUTH_TOKEN`. Confirm `FRONTEND_URL` matches your deployed frontend origin.
+3. Deploy → you get a URL like `https://stocker-backend.onrender.com`.
+
+**Railway** works the same way: New Project → Deploy from repo → set **Root Directory** to `backend`,
+start command `npm start`, and add the same env vars (Railway provides `PORT` automatically).
+
+### Frontend — Vercel (static)
+
+1. Import the repo in Vercel with **Root Directory = `frontend`** (a `frontend/vercel.json` sets the
+   `dist` output + SPA routing).
+2. Set **`VITE_BACKEND_URL`** to the backend URL from the step above (e.g.
+   `https://stocker-backend.onrender.com`), then redeploy.
+
+Finally, in the Paytm Developer Portal set the **Return URL** to the deployed **frontend** root.
 
 ## Scripts (run from the repo root)
 

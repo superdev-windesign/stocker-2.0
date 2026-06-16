@@ -1,0 +1,24 @@
+# Render Blueprint for the Stocker backend (Express).
+# Deploy: Render Dashboard → New → Blueprint → connect this repo. Render reads this file.
+# Then fill in the secret env vars (PAYTM_*, TURSO_*) in the service's Environment tab.
+services:
+  - type: web
+    name: stocker-backend
+    runtime: node
+    rootDir: backend
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: PAYTM_API_KEY
+        sync: false
+      - key: PAYTM_API_SECRET
+        sync: false
+      - key: TURSO_URL
+        sync: false
+      - key: TURSO_AUTH_TOKEN
+        sync: false
+      # The deployed frontend origin — used for CORS. Update if your frontend URL differs.
+      - key: FRONTEND_URL
+        value: https://stocker-2-0-frontend.vercel.app

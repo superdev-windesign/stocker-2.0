@@ -39,6 +39,9 @@ app.use((req, res, next) => {
   next()
 })
 
+// Lightweight health check for hosting platforms (Render/Railway) — always 200.
+app.get('/health', (req, res) => res.json({ ok: true }))
+
 // Step 1: send the user to Paytm's login page. ('/login' kept as a back-compat alias.)
 app.get(['/api/login', '/login'], (req, res) => {
   if (!apiKey) return res.status(500).send('PAYTM_API_KEY not configured in .env')
