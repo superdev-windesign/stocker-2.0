@@ -17,6 +17,24 @@ export function AuthProvider({ children }) {
   const [token, setToken] = useState(null)
   const [authError, setAuthError] = useState(null)
   const [checking, setChecking] = useState(true)
+  // Selected broker/provider (paytm | indmoney). Persisted so a refresh keeps the
+  // chosen platform. Drives which auth flow + markets the app uses.
+  const [provider, setProviderState] = useState(() => {
+    try {
+      return localStorage.getItem('stocker_provider') || null
+    } catch {
+      return null
+    }
+  })
+
+  const setProvider = (id) => {
+    setProviderState(id)
+    try {
+      id ? localStorage.setItem('stocker_provider', id) : localStorage.removeItem('stocker_provider')
+    } catch {
+      /* ignore */
+    }
+  }
   // Demo mode: show dummy portfolio data without a real Paytm login. Persisted so
   // a refresh stays in demo. Independent of `token` — can be toggled either way.
   const [demo, setDemoState] = useState(() => {
@@ -85,12 +103,13 @@ export function AuthProvider({ children }) {
   const logout = () => {
     setToken(null)
     setDemo(false)
+    setProvider(null)
     fetch(`${BACKEND_URL}/api/logout`, { method: 'POST' }).catch(() => {})
   }
 
   return (
     <AuthContext.Provider
-      value={{ token, setToken, authError, setAuthError, checking, logout, demo, setDemo }}
+      value={{ token, setToken, authError, setAuthError, checking, logout, demo, setDemo, provider, setProvider }}
     >
       {children}
     </AuthContext.Provider>

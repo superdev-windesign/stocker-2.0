@@ -29,6 +29,7 @@ import {
   clearTransactions,
 } from './lib/ledger.js'
 import { listSnapshots } from './lib/nav.js'
+import * as indmoney from './lib/indmoney.js'
 
 const PORT = Number(process.env.PORT || 5174)
 const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:5173'
@@ -192,6 +193,25 @@ app.delete('/api/transactions', ledgerHandler(async () => {
 
 // Portfolio NAV time-series (populated daily by the scheduler; empty until then).
 app.get('/api/nav', ledgerHandler(() => listSnapshots()))
+
+// ── INDmoney provider (US + Indian stocks) — scaffold; 501 until configured ──
+app.get('/api/indmoney/login', (req, res) => {
+  try {
+    res.redirect(indmoney.loginUrl())
+  } catch (err) {
+    res.status(err.status || 500).send(err.message)
+  }
+})
+const indmoneyHandler = (fn) => async (req, res) => {
+  try {
+    res.json(await fn(req))
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.message })
+  }
+}
+app.post('/api/indmoney/exchange', indmoneyHandler((req) => indmoney.exchangeRequestToken(req.body)))
+app.get('/api/indmoney/token', indmoneyHandler(() => indmoney.getToken()))
+app.get('/api/indmoney/token/retrieve', indmoneyHandler(() => indmoney.getToken()))
 
 app.listen(PORT, () => {
   console.log(`\n[stocker] token helper running on http://localhost:${PORT}`)
