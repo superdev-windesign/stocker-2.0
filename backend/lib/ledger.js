@@ -21,9 +21,16 @@ async function ensureTable() {
       charges     REAL NOT NULL DEFAULT 0,
       notes       TEXT,
       source      TEXT NOT NULL DEFAULT 'manual',  -- manual | csv | paytm
+      currency    TEXT NOT NULL DEFAULT 'INR',
+      country     TEXT NOT NULL DEFAULT 'IN',
       created_at  TEXT NOT NULL
     )
   `)
+  // Additive migration for DBs created before currency/country existed.
+  const info = await db.execute(`PRAGMA table_info(transactions)`)
+  const cols = new Set(info.rows.map((r) => r.name))
+  if (!cols.has('currency')) await db.execute(`ALTER TABLE transactions ADD COLUMN currency TEXT NOT NULL DEFAULT 'INR'`)
+  if (!cols.has('country')) await db.execute(`ALTER TABLE transactions ADD COLUMN country TEXT NOT NULL DEFAULT 'IN'`)
   tableReady = true
 }
 
@@ -41,6 +48,8 @@ const toApi = (r) => ({
   charges: Number(r.charges) || 0,
   notes: r.notes,
   source: r.source,
+  currency: r.currency || 'INR',
+  country: r.country || 'IN',
   createdAt: r.created_at,
 })
 
@@ -61,11 +70,15 @@ function clean(tx) {
   if (!(quantity > 0)) bad('quantity must be > 0')
   const price = Number(tx.price)
   if (!(price >= 0)) bad('price must be >= 0')
+  const exchange = (tx.exchange ? String(tx.exchange) : 'NSE').toUpperCase()
+  // Country/currency default to India; derive from exchange, allow explicit override.
+  const country = (tx.country ? String(tx.country) : exchange === 'NASDAQ' || exchange === 'NYSE' ? 'US' : 'IN').toUpperCase()
+  const currency = (tx.currency ? String(tx.currency) : country === 'US' ? 'USD' : 'INR').toUpperCase()
   return {
     securityId: tx.securityId != null ? String(tx.securityId) : null,
     symbol,
     name: tx.name ? String(tx.name) : null,
-    exchange: (tx.exchange ? String(tx.exchange) : 'NSE').toUpperCase(),
+    exchange,
     type,
     date,
     quantity,
@@ -73,6 +86,8 @@ function clean(tx) {
     charges: Number(tx.charges) || 0,
     notes: tx.notes ? String(tx.notes) : null,
     source: tx.source ? String(tx.source) : 'manual',
+    currency,
+    country,
   }
 }
 
@@ -90,9 +105,9 @@ export async function addTransaction(tx) {
   const createdAt = new Date().toISOString()
   await db.execute({
     sql: `INSERT INTO transactions
-            (id, security_id, symbol, name, exchange, type, date, quantity, price, charges, notes, source, created_at)
-          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-    args: [id, c.securityId, c.symbol, c.name, c.exchange, c.type, c.date, c.quantity, c.price, c.charges, c.notes, c.source, createdAt],
+            (id, security_id, symbol, name, exchange, type, date, quantity, price, charges, notes, source, currency, country, created_at)
+          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+    args: [id, c.securityId, c.symbol, c.name, c.exchange, c.type, c.date, c.quantity, c.price, c.charges, c.notes, c.source, c.currency, c.country, createdAt],
   })
   return { id, createdAt, ...c }
 }
@@ -102,9 +117,9 @@ export async function updateTransaction(id, tx) {
   const c = clean(tx)
   const res = await db.execute({
     sql: `UPDATE transactions SET
-            security_id=?, symbol=?, name=?, exchange=?, type=?, date=?, quantity=?, price=?, charges=?, notes=?, source=?
+            security_id=?, symbol=?, name=?, exchange=?, type=?, date=?, quantity=?, price=?, charges=?, notes=?, source=?, currency=?, country=?
           WHERE id=?`,
-    args: [c.securityId, c.symbol, c.name, c.exchange, c.type, c.date, c.quantity, c.price, c.charges, c.notes, c.source, id],
+    args: [c.securityId, c.symbol, c.name, c.exchange, c.type, c.date, c.quantity, c.price, c.charges, c.notes, c.source, c.currency, c.country, id],
   })
   if (res.rowsAffected === 0) {
     const e = new Error('Transaction not found')
@@ -128,9 +143,9 @@ export async function importTransactions(rows) {
     const c = clean(tx)
     return {
       sql: `INSERT INTO transactions
-              (id, security_id, symbol, name, exchange, type, date, quantity, price, charges, notes, source, created_at)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-      args: [randomUUID(), c.securityId, c.symbol, c.name, c.exchange, c.type, c.date, c.quantity, c.price, c.charges, c.notes, c.source, createdAt],
+              (id, security_id, symbol, name, exchange, type, date, quantity, price, charges, notes, source, currency, country, created_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      args: [randomUUID(), c.securityId, c.symbol, c.name, c.exchange, c.type, c.date, c.quantity, c.price, c.charges, c.notes, c.source, c.currency, c.country, createdAt],
     }
   })
   await db.batch(stmts, 'write')

@@ -10,6 +10,10 @@ import TradeHistory from '../components/dashboard/TradeHistory'
 import RealizedProfit from '../components/dashboard/RealizedProfit'
 import AdvancedAnalytics from '../components/dashboard/AdvancedAnalytics'
 import InvestmentJourney from '../components/dashboard/InvestmentJourney'
+import SmartCounts from '../components/dashboard/SmartCounts'
+import ReentryOpportunities from '../components/dashboard/ReentryOpportunities'
+import TopMovers from '../components/dashboard/TopMovers'
+import RecentTransactions from '../components/dashboard/RecentTransactions'
 
 const BACKEND_URL =
   import.meta.env.VITE_BACKEND_URL ?? (import.meta.env.DEV ? 'http://localhost:5174' : '')
@@ -67,15 +71,21 @@ export default function PortfolioDashboard() {
       </div>
 
       <SummaryCards summary={summary} />
+      <SmartCounts />
       <AllocationCharts holdings={holdings} />
+      <ReentryOpportunities />
+      <RealizedProfit />
       <HoldingsTable holdings={holdings} />
+      <TopMovers />
       <div className="grid gap-6 xl:grid-cols-2">
         <PerformanceTimeline summary={summary} />
-        <InvestmentJourney holdings={holdings} orders={orders} />
+        <RecentTransactions />
       </div>
       <AdvancedAnalytics holdings={holdings} />
-      <TradeHistory orders={orders} />
-      <RealizedProfit />
+      <div className="grid gap-6 xl:grid-cols-2">
+        <InvestmentJourney holdings={holdings} orders={orders} />
+        <TradeHistory orders={orders} />
+      </div>
     </div>
   )
 }
