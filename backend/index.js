@@ -20,6 +20,14 @@ import {
   clearTokens,
   paytmGet,
 } from './lib/paytm.js'
+import {
+  listTransactions,
+  addTransaction,
+  updateTransaction,
+  deleteTransaction,
+  importTransactions,
+  clearTransactions,
+} from './lib/ledger.js'
 
 const PORT = Number(process.env.PORT || 5174)
 const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:5173'
@@ -155,6 +163,31 @@ app.get('/api/funds', proxy(() => paytmGet('/accounts/v1/funds/summary', { confi
 app.get('/api/profile', proxy(() => paytmGet('/accounts/v1/user/details')))
 app.get('/api/price-chart', proxy((req) => paytmGet('/data/v1/price-charts/sym', req.query)))
 app.get('/api/quote', proxy((req) => paytmGet('/data/v1/price/live', req.query)))
+
+// ── Transaction ledger (lifetime buy/sell history) ───────────────────────────
+// Persisted in Turso. Powers Stock Journey, trade analytics, re-entry tracking.
+const ledgerHandler = (fn) => async (req, res) => {
+  try {
+    res.json(await fn(req))
+  } catch (err) {
+    const status = err.status || 500
+    if (status === 500) console.error('[stocker] ledger error:', err.message)
+    res.status(status).json({ error: err.message })
+  }
+}
+
+app.get('/api/transactions', ledgerHandler(() => listTransactions()))
+app.post('/api/transactions', ledgerHandler((req) => addTransaction(req.body)))
+app.post('/api/transactions/import', ledgerHandler((req) => importTransactions(req.body?.transactions || req.body)))
+app.put('/api/transactions/:id', ledgerHandler((req) => updateTransaction(req.params.id, req.body)))
+app.delete('/api/transactions/:id', ledgerHandler(async (req) => {
+  await deleteTransaction(req.params.id)
+  return { ok: true }
+}))
+app.delete('/api/transactions', ledgerHandler(async () => {
+  await clearTransactions()
+  return { ok: true }
+}))
 
 app.listen(PORT, () => {
   console.log(`\n[stocker] token helper running on http://localhost:${PORT}`)

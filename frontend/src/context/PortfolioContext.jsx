@@ -1,20 +1,33 @@
-import { createContext, useContext, useEffect, useState, useCallback } from 'react'
+import { createContext, useContext, useEffect, useState, useCallback, useMemo } from 'react'
 import { fetchHoldings, fetchOrders, fetchFunds } from '../services/portfolioApi'
+import {
+  fetchTransactions,
+  createTransaction,
+  updateTransactionApi,
+  deleteTransactionApi,
+  importTransactionsApi,
+} from '../services/ledgerApi'
 import { normalizeHoldings } from '../analytics/normalize'
-import { DEMO_HOLDINGS, DEMO_ORDERS } from '../data/demoPortfolio'
+import { buildAllJourneys } from '../analytics/ledger'
+import { DEMO_HOLDINGS, DEMO_ORDERS, DEMO_TRANSACTIONS, DEMO_EXITED_PRICES } from '../data/demoPortfolio'
 import { useAuth } from './AuthContext'
 
 const PortfolioContext = createContext(null)
 
+let demoIdSeq = 1
+const demoId = () => `demo-${demoIdSeq++}`
+
 /**
- * Loads holdings/orders/funds once and shares normalized portfolio data across the
- * dashboard so each section doesn't refetch. Surfaces a 401 as `needsLogin`.
+ * Loads holdings/orders/funds + the lifetime transaction ledger, and derives a
+ * per-stock "journey" (FIFO realized/unrealized P&L, dates, status). Shared across
+ * the app so sections don't refetch. Surfaces a 401 as `needsLogin`.
  */
 export function PortfolioProvider({ children }) {
   const [holdings, setHoldings] = useState([])
   const [orders, setOrders] = useState([])
   const [funds, setFunds] = useState(null)
   const [holdingsValue, setHoldingsValue] = useState(null)
+  const [transactions, setTransactions] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [needsLogin, setNeedsLogin] = useState(false)
@@ -25,10 +38,11 @@ export function PortfolioProvider({ children }) {
     setError(null)
     setNeedsLogin(false)
 
-    // Demo mode: serve dummy data through the same normalize pipeline, no fetch.
+    // Demo mode: serve dummy data through the same pipeline, no fetch.
     if (demo) {
       setHoldings(normalizeHoldings(DEMO_HOLDINGS))
       setOrders(DEMO_ORDERS)
+      setTransactions(DEMO_TRANSACTIONS.map((tx) => ({ ...tx, id: demoId(), createdAt: tx.date })))
       setFunds(null)
       setHoldingsValue(null)
       setLoading(false)
@@ -36,7 +50,12 @@ export function PortfolioProvider({ children }) {
     }
 
     try {
-      const [h, o, f] = await Promise.allSettled([fetchHoldings(), fetchOrders(), fetchFunds()])
+      const [h, o, f, tx] = await Promise.allSettled([
+        fetchHoldings(),
+        fetchOrders(),
+        fetchFunds(),
+        fetchTransactions(),
+      ])
 
       if (h.status === 'fulfilled') {
         setHoldings(normalizeHoldings(h.value))
@@ -49,6 +68,7 @@ export function PortfolioProvider({ children }) {
 
       if (o.status === 'fulfilled') setOrders(extractOrders(o.value))
       if (f.status === 'fulfilled') setFunds(f.value)
+      if (tx.status === 'fulfilled') setTransactions(Array.isArray(tx.value) ? tx.value : [])
     } catch (e) {
       setError(e.message)
     } finally {
@@ -60,9 +80,102 @@ export function PortfolioProvider({ children }) {
     load()
   }, [load])
 
+  // Reload only the ledger (after a mutation), leaving holdings/quotes untouched.
+  const reloadTransactions = useCallback(async () => {
+    if (demo) return
+    try {
+      const list = await fetchTransactions()
+      setTransactions(Array.isArray(list) ? list : [])
+    } catch (e) {
+      setError(e.message)
+    }
+  }, [demo])
+
+  // ── Ledger mutations (demo edits local state; live hits the API then refetches) ──
+  const addTxn = useCallback(
+    async (tx) => {
+      if (demo) {
+        setTransactions((prev) => [...prev, { ...tx, id: demoId(), createdAt: new Date().toISOString() }])
+        return
+      }
+      await createTransaction(tx)
+      await reloadTransactions()
+    },
+    [demo, reloadTransactions],
+  )
+
+  const editTxn = useCallback(
+    async (id, tx) => {
+      if (demo) {
+        setTransactions((prev) => prev.map((t) => (t.id === id ? { ...t, ...tx } : t)))
+        return
+      }
+      await updateTransactionApi(id, tx)
+      await reloadTransactions()
+    },
+    [demo, reloadTransactions],
+  )
+
+  const removeTxn = useCallback(
+    async (id) => {
+      if (demo) {
+        setTransactions((prev) => prev.filter((t) => t.id !== id))
+        return
+      }
+      await deleteTransactionApi(id)
+      await reloadTransactions()
+    },
+    [demo, reloadTransactions],
+  )
+
+  const importTxns = useCallback(
+    async (rows) => {
+      if (demo) {
+        setTransactions((prev) => [
+          ...prev,
+          ...rows.map((tx) => ({ ...tx, id: demoId(), createdAt: new Date().toISOString() })),
+        ])
+        return { added: rows.length }
+      }
+      const res = await importTransactionsApi(rows)
+      await reloadTransactions()
+      return res
+    },
+    [demo, reloadTransactions],
+  )
+
+  // Derived: one journey per distinct symbol across the whole ledger.
+  const journeys = useMemo(
+    () => buildAllJourneys(transactions, holdings, demo ? DEMO_EXITED_PRICES : {}),
+    [transactions, holdings, demo],
+  )
+
+  const journeyBySymbol = useMemo(() => {
+    const m = new Map()
+    for (const j of journeys) m.set(String(j.symbol).toUpperCase(), j)
+    return m
+  }, [journeys])
+
   return (
     <PortfolioContext.Provider
-      value={{ holdings, orders, funds, holdingsValue, loading, error, needsLogin, reload: load }}
+      value={{
+        holdings,
+        orders,
+        funds,
+        holdingsValue,
+        transactions,
+        journeys,
+        journeyBySymbol,
+        loading,
+        error,
+        needsLogin,
+        reload: load,
+        reloadTransactions,
+        addTxn,
+        editTxn,
+        removeTxn,
+        importTxns,
+      }}
     >
       {children}
     </PortfolioContext.Provider>

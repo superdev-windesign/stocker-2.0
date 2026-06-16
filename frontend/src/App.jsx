@@ -6,6 +6,7 @@ import TokenGate from './components/TokenGate'
 import PortfolioDashboard from './routes/PortfolioDashboard'
 import StockDetail from './routes/StockDetail'
 import LivePage from './routes/LivePage'
+import Ledger from './routes/Ledger'
 
 function NavTab({ to, children }) {
   return (
@@ -45,6 +46,7 @@ function Layout({ children }) {
           </button>
           <nav className="flex items-center gap-1">
             <NavTab to="/">Portfolio</NavTab>
+            <NavTab to="/ledger">Ledger</NavTab>
             <NavTab to="/live">Live</NavTab>
           </nav>
           <div className="flex items-center gap-2">
@@ -94,6 +96,7 @@ export default function App() {
       <Layout>
         <Routes>
           <Route path="/" element={<PortfolioDashboard />} />
+          <Route path="/ledger" element={<Ledger />} />
           <Route path="/stock/:securityId" element={<StockDetail />} />
           <Route path="/live" element={<LivePage />} />
         </Routes>

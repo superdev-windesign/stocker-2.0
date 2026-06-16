@@ -10,54 +10,75 @@ import PriceChartWithMarkers from '../components/stock/PriceChartWithMarkers'
 import BuySellTimeline from '../components/stock/BuySellTimeline'
 import PerformanceMetrics from '../components/stock/PerformanceMetrics'
 import AthAtlSection from '../components/stock/AthAtlSection'
+import StockJourney from '../components/stock/StockJourney'
 
 export default function StockDetail() {
   const { securityId } = useParams()
   const navigate = useNavigate()
-  const { holdings, orders, loading } = usePortfolio()
+  const { holdings, journeys, journeyBySymbol, loading } = usePortfolio()
   const [tf, setTf] = useState('1Y')
 
+  // Resolve the stock from current holdings first; otherwise from the ledger
+  // (so fully-exited stocks open too).
   const holding = useMemo(
     () => holdings.find((h) => String(h.securityId) === String(securityId)),
     [holdings, securityId],
   )
 
+  const journey = useMemo(() => {
+    if (holding) return journeyBySymbol.get(String(holding.symbol).toUpperCase())
+    return journeys.find((j) => String(j.securityId) === String(securityId))
+  }, [holding, journeys, journeyBySymbol, securityId])
+
+  // A unified subject for the header/chart, whether held or exited.
+  const subject = useMemo(() => {
+    if (holding) return holding
+    if (journey)
+      return {
+        securityId: journey.securityId,
+        symbol: journey.symbol,
+        name: journey.name,
+        exchange: journey.exchange || 'NSE',
+        quantity: journey.currentQty,
+        avgPrice: journey.avgBuyPrice,
+        lastPrice: journey.lastPrice,
+        pnl: journey.unrealizedPnl,
+        pnlPct: journey.totalReturnPct,
+      }
+    return null
+  }, [holding, journey])
+
   const { candles, loading: chartLoading, error: chartError } = usePriceChart(
-    securityId,
-    holding?.exchange || 'NSE',
+    subject?.securityId,
+    subject?.exchange || 'NSE',
     tf,
   )
   const stats = useMemo(() => (candles.length ? stockStats(candles) : null), [candles])
 
-  // Today's trades for this stock (overlay markers + timeline).
-  const trades = useMemo(() => {
-    const sym = holding?.symbol
-    return (orders || [])
-      .filter((o) => {
-        const s = o.security_symbol || o.symbol || o.tradingsymbol || o.display_name
-        return sym && String(s).toUpperCase() === String(sym).toUpperCase()
-      })
-      .map((o) => {
-        const qty = Number(o.quantity || o.qty || 0)
-        const price = Number(o.avg_traded_price || o.price || 0)
-        const t = o.order_date_time || o.create_time || o.exchange_time
-        const side = String(o.txn_type || o.transaction_type || o.type || 'B').toUpperCase().startsWith('B') ? 'BUY' : 'SELL'
-        return { time: t ? Math.floor(new Date(t).getTime() / 1000) : null, side, qty, price, value: qty * price }
-      })
-  }, [orders, holding])
-
-  const markers = useMemo(() => trades.filter((t) => t.time).map((t) => ({ ...t })), [trades])
+  // BUY/SELL markers from the full lifetime ledger.
+  const markers = useMemo(() => {
+    if (!journey) return []
+    return journey.transactions
+      .map((t) => ({
+        time: Math.floor(new Date(t.date).getTime() / 1000),
+        side: t.type,
+        qty: t.quantity,
+        price: t.price,
+        value: t.quantity * t.price,
+      }))
+      .filter((m) => m.time)
+  }, [journey])
 
   if (loading) {
     return <div className="space-y-4"><Skeleton className="h-24" /><Skeleton className="h-80" /></div>
   }
 
-  if (!holding) {
+  if (!subject) {
     return (
       <EmptyState
         icon="🔍"
-        title="Stock not in your holdings"
-        message="This security isn't in your current Paytm holdings."
+        title="Stock not found"
+        message="This security isn't in your holdings or transaction history."
         action={
           <button onClick={() => navigate('/')} className="mt-3 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-500">
             Back to portfolio
@@ -73,7 +94,9 @@ export default function StockDetail() {
         ← Back to portfolio
       </button>
 
-      <StockHeader holding={holding} />
+      <StockHeader holding={subject} />
+
+      {journey && <StockJourney journey={journey} />}
 
       <Card className="p-4">
         <SectionTitle
@@ -88,17 +111,17 @@ export default function StockDetail() {
             Couldn't load candles: {chartError}
           </div>
         ) : (
-          <PriceChartWithMarkers candles={candles} avgPrice={holding.avgPrice} markers={markers} />
+          <PriceChartWithMarkers candles={candles} avgPrice={subject.avgPrice} markers={markers} />
         )}
       </Card>
 
       <div className="grid gap-6 lg:grid-cols-2">
-        <PositionSummary holding={holding} />
-        <AthAtlSection holding={holding} stats={stats} />
+        {holding && <PositionSummary holding={holding} />}
+        <AthAtlSection holding={subject} stats={stats} />
       </div>
 
-      <PerformanceMetrics holding={holding} stats={stats} />
-      <BuySellTimeline trades={trades} />
+      <PerformanceMetrics holding={subject} stats={stats} />
+      <BuySellTimeline transactions={journey?.transactions || []} />
     </div>
   )
 }

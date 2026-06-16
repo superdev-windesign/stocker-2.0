@@ -42,3 +42,43 @@ export const DEMO_HOLDINGS = {
 }
 
 export const DEMO_ORDERS = []
+
+// Demo lifetime ledger — illustrative buy/sell history so the Stock Journey,
+// timeline, trade analytics, and re-entry features render without a real login.
+// Includes held stocks (multiple buys / partial sells) and a FULLY EXITED stock
+// (WIPRO) to showcase the re-entry watchlist + last-sold reminder.
+const t = (symbol, name, securityId, type, date, quantity, price, notes = null) => ({
+  symbol, name, securityId, exchange: 'NSE', type, date, quantity, price, notes, source: 'manual',
+})
+
+export const DEMO_TRANSACTIONS = [
+  // RELIANCE — averaged up over time, still holding 50.
+  t('RELIANCE', 'Reliance Industries', '2885', 'BUY', '2022-03-14', 20, 2280, 'Initial position after correction'),
+  t('RELIANCE', 'Reliance Industries', '2885', 'BUY', '2022-09-02', 20, 2410, 'Added on Jio momentum'),
+  t('RELIANCE', 'Reliance Industries', '2885', 'BUY', '2023-06-19', 10, 2560),
+
+  // TCS — bought, averaged, took partial profit, re-bought. Currently 30.
+  t('TCS', 'Tata Consultancy Services', '11536', 'BUY', '2021-11-05', 15, 3350, 'Long-term conviction stock'),
+  t('TCS', 'Tata Consultancy Services', '11536', 'BUY', '2022-06-20', 15, 3180, 'Averaged on IT selloff'),
+  t('TCS', 'Tata Consultancy Services', '11536', 'SELL', '2023-01-12', 10, 3520, 'Booked partial profit'),
+  t('TCS', 'Tata Consultancy Services', '11536', 'BUY', '2023-10-30', 10, 3410),
+
+  // HDFCBANK — accumulated through the merger overhang. Holding 60.
+  t('HDFCBANK', 'HDFC Bank', '1333', 'BUY', '2022-02-10', 30, 1380, 'Bought after quarterly results'),
+  t('HDFCBANK', 'HDFC Bank', '1333', 'BUY', '2023-07-25', 30, 1520, 'Added post-merger dip'),
+
+  // INFY — holding 80.
+  t('INFY', 'Infosys', '1594', 'BUY', '2022-05-18', 50, 1320),
+  t('INFY', 'Infosys', '1594', 'BUY', '2023-03-09', 30, 1480, 'Averaged on guidance cut'),
+
+  // WIPRO — FULLY EXITED. Sold everything; now a re-entry candidate.
+  t('WIPRO', 'Wipro', '3787', 'BUY', '2021-12-01', 100, 640, 'IT sector bet'),
+  t('WIPRO', 'Wipro', '3787', 'SELL', '2022-04-22', 50, 580, 'Cut half — momentum fading'),
+  t('WIPRO', 'Wipro', '3787', 'SELL', '2022-08-15', 50, 420, 'Sold remaining — valuation was high, exited fully'),
+]
+
+// Current prices for symbols that aren't in holdings (i.e. fully exited), so the
+// re-entry watchlist / last-sold reminder can compare against live price in demo.
+export const DEMO_EXITED_PRICES = {
+  WIPRO: 248.5, // well below the ₹420 last exit → shows as a re-entry opportunity
+}

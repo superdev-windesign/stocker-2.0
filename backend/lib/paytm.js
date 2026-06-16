@@ -18,6 +18,9 @@ const db = createClient({
   authToken: process.env.TURSO_AUTH_TOKEN,
 })
 
+// Exported so the transaction ledger (lib/ledger.js) reuses the same connection.
+export { db }
+
 let tableReady = false
 async function ensureTable() {
   if (tableReady) return
