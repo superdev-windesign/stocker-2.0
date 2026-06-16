@@ -1,6 +1,7 @@
 import { useMemo, useRef, useState } from 'react'
 import Papa from 'papaparse'
 import { usePortfolio } from '../context/PortfolioContext'
+import { buildHoldingSeedRows } from '../analytics/paytmSync'
 import { Card, SectionTitle, EmptyState } from '../components/common/ui'
 import { inr, fmtDate } from '../analytics/format'
 
@@ -37,7 +38,7 @@ function rowToTxn(row) {
 }
 
 export default function Ledger() {
-  const { transactions, addTxn, editTxn, removeTxn, importTxns } = usePortfolio()
+  const { transactions, holdings, addTxn, editTxn, removeTxn, importTxns } = usePortfolio()
   const [form, setForm] = useState(BLANK)
   const [editingId, setEditingId] = useState(null)
   const [busy, setBusy] = useState(false)
@@ -86,6 +87,24 @@ export default function Ledger() {
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
 
+  const syncFromPaytm = async () => {
+    setMsg(null)
+    const rows = buildHoldingSeedRows(holdings, transactions)
+    if (!rows.length) {
+      setMsg({ type: 'ok', text: 'Nothing new to sync — every current holding is already in your ledger.' })
+      return
+    }
+    setBusy(true)
+    try {
+      const r = await importTxns(rows)
+      setMsg({ type: 'ok', text: `Synced ${r?.added ?? rows.length} holdings from Paytm as baseline positions.` })
+    } catch (err) {
+      setMsg({ type: 'error', text: err.message })
+    } finally {
+      setBusy(false)
+    }
+  }
+
   const onFile = (e) => {
     const file = e.target.files?.[0]
     if (!file) return
@@ -129,6 +148,14 @@ export default function Ledger() {
             {editingId ? 'Edit transaction' : 'Add a transaction'}
           </h3>
           <div className="flex items-center gap-2">
+            <button
+              onClick={syncFromPaytm}
+              disabled={busy}
+              title="Seed your ledger from current Paytm holdings"
+              className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm font-medium hover:border-slate-400 disabled:opacity-50 dark:border-white/10 dark:hover:border-white/30"
+            >
+              🔄 Sync from Paytm
+            </button>
             <button
               onClick={() => fileRef.current?.click()}
               className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm font-medium hover:border-slate-400 dark:border-white/10 dark:hover:border-white/30"
