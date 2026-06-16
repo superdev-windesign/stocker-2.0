@@ -1,36 +1,127 @@
-// INDmoney provider adapter (US + Indian stocks) — SCAFFOLD.
+// INDstocks / INDmoney provider adapter (US + Indian stocks).
 //
-// INDmoney's trading API is not the same as Paytm's. This module defines the seam the
-// rest of the app expects (login URL, token exchange, session retrieval) but the live
-// calls are intentionally NOT implemented yet: they require INDmoney's actual API spec
-// (auth flow, base URL, endpoints) + credentials. Set the INDMONEY_* env vars and fill
-// in the marked sections to enable. Until then routes return 501 with a clear message.
+// Based on the INDstocks API skill: token-based auth (log in -> auth token -> send the
+// token in a header on every request), REST endpoints for holdings, quotes, historical
+// data, and a WebSocket for streaming. The skill documents the *structure*; the exact
+// base URL, paths, header name and response field names must be confirmed against
+// https://api-docs.indstocks.com (reachable from the deployed backend, not the dev sandbox).
+// Those specifics are therefore ENV-CONFIGURABLE so they can be corrected without code
+// changes. This app is read-only (no order placement).
+//
+// Auth model used here (lowest-risk, matches the rest of Stocker): the user logs in on
+// INDstocks, obtains an access token, and we store it server-side in Turso; all data
+// calls send it via the auth header. An OAuth redirect flow can replace exchange() later.
+import { db } from './paytm.js'
 
-const API_KEY = process.env.INDMONEY_API_KEY
-const API_SECRET = process.env.INDMONEY_API_SECRET
+const API_BASE = (process.env.INDSTOCKS_API_BASE || '').replace(/\/$/, '')
+const AUTH_HEADER = process.env.INDSTOCKS_AUTH_HEADER || 'Authorization'
+const AUTH_SCHEME = process.env.INDSTOCKS_AUTH_SCHEME ?? 'Bearer ' // set to '' for a bare token
+// Endpoint paths (defaults from the skill's section names — verify against the docs).
+const PATH_HOLDINGS = process.env.INDSTOCKS_PATH_HOLDINGS || '/holdings'
+const PATH_QUOTE = process.env.INDSTOCKS_PATH_QUOTE || '/MarketQuote'
+const PATH_HISTORICAL = process.env.INDSTOCKS_PATH_HISTORICAL || '/historicalData'
 
-export const isConfigured = () => Boolean(API_KEY && API_SECRET)
+export const isConfigured = () => Boolean(API_BASE)
 
-function notImplemented() {
-  const e = new Error(
-    'INDmoney integration is not configured yet. Set INDMONEY_API_KEY / INDMONEY_API_SECRET ' +
-      'and implement the auth flow in backend/lib/indmoney.js (needs INDmoney API details).',
-  )
-  e.status = 501
-  throw e
+let tableReady = false
+async function ensureTable() {
+  if (tableReady) return
+  await db.execute(`
+    CREATE TABLE IF NOT EXISTS indmoney_session (
+      id       INTEGER PRIMARY KEY CHECK (id = 1),
+      data     TEXT NOT NULL,
+      saved_at TEXT NOT NULL
+    )
+  `)
+  tableReady = true
 }
 
-// TODO(indmoney): build the login redirect URL once the OAuth/login flow is known.
-export function loginUrl() {
-  notImplemented()
+export async function saveToken(tokens) {
+  await ensureTable()
+  await db.execute({
+    sql: `INSERT INTO indmoney_session (id, data, saved_at) VALUES (1, ?, ?)
+          ON CONFLICT(id) DO UPDATE SET data = excluded.data, saved_at = excluded.saved_at`,
+    args: [JSON.stringify(tokens), new Date().toISOString()],
+  })
 }
 
-// TODO(indmoney): exchange the request/auth token for an access token + persist it.
-export async function exchangeRequestToken() {
-  notImplemented()
+export async function getStoredToken() {
+  await ensureTable()
+  const res = await db.execute(`SELECT data FROM indmoney_session WHERE id = 1`)
+  if (!res.rows.length) return null
+  try {
+    return JSON.parse(res.rows[0].data)
+  } catch {
+    return null
+  }
 }
 
-// TODO(indmoney): read the stored session / token.
+// Accepts a pasted/issued access token and persists it. (Swap for a real OAuth
+// request-token exchange once the INDstocks login flow specifics are confirmed.)
+export async function exchangeRequestToken(body = {}) {
+  const token = body.access_token || body.token || body.request_token
+  if (!token) {
+    const e = new Error('access token is required')
+    e.status = 400
+    throw e
+  }
+  const tokens = { access_token: token, public_access_token: token, generated_at: new Date().toISOString() }
+  await saveToken(tokens)
+  return { public_access_token: token }
+}
+
 export async function getToken() {
-  notImplemented()
+  const t = await getStoredToken()
+  if (!t?.public_access_token) {
+    const e = new Error('No INDstocks token stored. Please log in / paste a token first.')
+    e.status = 404
+    throw e
+  }
+  return {
+    public_access_token: t.public_access_token,
+    generated_at: t.generated_at,
+    expires_at: t.expires_at || null,
+  }
 }
+
+// Authenticated GET against the INDstocks REST API using the stored token.
+export async function indGet(path, query = {}) {
+  if (!API_BASE) {
+    const e = new Error('INDSTOCKS_API_BASE not configured')
+    e.status = 501
+    throw e
+  }
+  const t = await getStoredToken()
+  if (!t?.access_token) {
+    const e = new Error('Not logged in to INDstocks')
+    e.status = 401
+    throw e
+  }
+  const qs = new URLSearchParams(query).toString()
+  const url = `${API_BASE}${path}${qs ? `?${qs}` : ''}`
+  const resp = await fetch(url, {
+    headers: {
+      'Content-Type': 'application/json',
+      [AUTH_HEADER]: `${AUTH_SCHEME}${t.access_token}`,
+    },
+  })
+  const text = await resp.text()
+  let bodyOut
+  try {
+    bodyOut = JSON.parse(text)
+  } catch {
+    bodyOut = text
+  }
+  if (!resp.ok) {
+    const e = new Error(typeof bodyOut === 'string' ? bodyOut : JSON.stringify(bodyOut))
+    e.status = resp.status
+    throw e
+  }
+  return bodyOut
+}
+
+// Read-only portfolio data. Response shapes are passed through; the field mapping to the
+// app's normalized shape is finalized once a real response is observed on the docs/deploy.
+export const getHoldings = () => indGet(PATH_HOLDINGS)
+export const getQuote = (query) => indGet(PATH_QUOTE, query)
+export const getHistorical = (query) => indGet(PATH_HISTORICAL, query)

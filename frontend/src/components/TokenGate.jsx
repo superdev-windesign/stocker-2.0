@@ -71,10 +71,34 @@ function ConnectPanel({ provider, onConnect, onBack, error }) {
   const [loading, setLoading] = useState(false)
   const [retrieveError, setRetrieveError] = useState(null)
 
-  const submit = (e) => {
+  const [submitting, setSubmitting] = useState(false)
+  const submit = async (e) => {
     e.preventDefault()
     const t = token.trim()
-    if (t) onConnect(t)
+    if (!t) return
+    // Token-auth providers (e.g. INDstocks) store the token server-side first so the
+    // backend data proxy can use it; redirect providers (Paytm) already have a session.
+    if (provider.exchangePath) {
+      setSubmitting(true)
+      try {
+        const res = await fetch(`${BACKEND_URL}${provider.exchangePath}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ access_token: t }),
+        })
+        const data = await res.json().catch(() => ({}))
+        if (!res.ok) {
+          setRetrieveError(data.error || 'Failed to store token')
+          return
+        }
+      } catch (err) {
+        setRetrieveError(err.message)
+        return
+      } finally {
+        setSubmitting(false)
+      }
+    }
+    onConnect(t)
   }
 
   const fetchStoredToken = async () => {
@@ -140,15 +164,24 @@ function ConnectPanel({ provider, onConnect, onBack, error }) {
 
           <Divider>or</Divider>
 
-          <a
-            href={`${BACKEND_URL}${provider.loginPath}`}
-            className="flex w-full items-center justify-center gap-2 rounded-lg bg-indigo-600 py-2.5 font-semibold text-white transition hover:bg-indigo-500"
-          >
-            🔑 Login with {provider.name}
-          </a>
-          <p className="mt-2 text-xs text-gray-500">
-            Opens {provider.name} login; the backend exchanges your request token and stores the session.
-          </p>
+          {provider.auth === 'redirect' ? (
+            <>
+              <a
+                href={`${BACKEND_URL}${provider.loginPath}`}
+                className="flex w-full items-center justify-center gap-2 rounded-lg bg-indigo-600 py-2.5 font-semibold text-white transition hover:bg-indigo-500"
+              >
+                🔑 Login with {provider.name}
+              </a>
+              <p className="mt-2 text-xs text-gray-500">
+                Opens {provider.name} login; the backend exchanges your request token and stores the session.
+              </p>
+            </>
+          ) : (
+            <p className="text-xs text-gray-500">
+              Log in to {provider.name}, generate an access token, and paste it below — it's stored
+              securely on the backend for data access.
+            </p>
+          )}
         </>
       )}
 
@@ -162,10 +195,10 @@ function ConnectPanel({ provider, onConnect, onBack, error }) {
       />
       <button
         type="submit"
-        disabled={!token.trim()}
+        disabled={!token.trim() || submitting}
         className="mt-4 w-full rounded-lg border border-white/15 py-2.5 font-semibold text-gray-200 transition hover:border-white/35 disabled:cursor-not-allowed disabled:opacity-40"
       >
-        Connect with pasted token
+        {submitting ? 'Connecting…' : 'Connect with pasted token'}
       </button>
     </form>
   )

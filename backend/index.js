@@ -194,24 +194,24 @@ app.delete('/api/transactions', ledgerHandler(async () => {
 // Portfolio NAV time-series (populated daily by the scheduler; empty until then).
 app.get('/api/nav', ledgerHandler(() => listSnapshots()))
 
-// ── INDmoney provider (US + Indian stocks) — scaffold; 501 until configured ──
-app.get('/api/indmoney/login', (req, res) => {
-  try {
-    res.redirect(indmoney.loginUrl())
-  } catch (err) {
-    res.status(err.status || 500).send(err.message)
-  }
-})
+// ── INDmoney / INDstocks provider (US + Indian stocks) ──────────────────────
+// Token-based: user logs in on INDstocks, pastes/issues a token to /exchange, which
+// is stored; data routes proxy the INDstocks REST API with it. Needs INDSTOCKS_API_BASE
+// (+ a token) configured to work — returns clear errors until then.
 const indmoneyHandler = (fn) => async (req, res) => {
   try {
     res.json(await fn(req))
   } catch (err) {
-    res.status(err.status || 500).json({ error: err.message })
+    const status = err.status || 500
+    if (status === 500) console.error('[stocker] indmoney error:', err.message)
+    res.status(status).json({ error: err.message })
   }
 }
 app.post('/api/indmoney/exchange', indmoneyHandler((req) => indmoney.exchangeRequestToken(req.body)))
 app.get('/api/indmoney/token', indmoneyHandler(() => indmoney.getToken()))
 app.get('/api/indmoney/token/retrieve', indmoneyHandler(() => indmoney.getToken()))
+app.get('/api/indmoney/holdings', indmoneyHandler(() => indmoney.getHoldings()))
+app.get('/api/indmoney/quote', indmoneyHandler((req) => indmoney.getQuote(req.query)))
 
 app.listen(PORT, () => {
   console.log(`\n[stocker] token helper running on http://localhost:${PORT}`)

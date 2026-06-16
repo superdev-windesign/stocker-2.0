@@ -12,9 +12,8 @@ export const PROVIDERS = {
     name: 'Paytm Money',
     markets: 'Indian stocks (NSE/BSE)',
     flag: '🇮🇳',
-    accent: 'indigo',
     available: true,
-    // Backend auth/data paths (adapter seam — INDmoney mirrors these once built).
+    auth: 'redirect', // backend redirect login flow
     loginPath: '/api/login',
     tokenRetrievePath: '/api/token/retrieve',
   },
@@ -23,9 +22,9 @@ export const PROVIDERS = {
     name: 'INDmoney',
     markets: 'US + Indian stocks',
     flag: '🇺🇸🇮🇳',
-    accent: 'emerald',
     available: indmoneyEnabled,
-    loginPath: '/api/indmoney/login',
+    auth: 'token', // log in on INDstocks, paste the issued token (stored server-side)
+    exchangePath: '/api/indmoney/exchange',
     tokenRetrievePath: '/api/indmoney/token/retrieve',
   },
 }
