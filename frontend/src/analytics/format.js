@@ -20,6 +20,16 @@ export const inrCompact = (n) => {
   return `₹${v.toFixed(2)}`
 }
 
+// Currency-aware amount formatter (₹ for INR, $ for USD, etc.) for mixed India/US
+// portfolios. Components that show per-stock amounts can use this with holding.currency.
+const CURRENCY_SYMBOL = { INR: '₹', USD: '$', EUR: '€', GBP: '£' }
+export const money = (n, currency = 'INR', opts = {}) => {
+  if (n == null || Number.isNaN(Number(n))) return '—'
+  const sym = CURRENCY_SYMBOL[currency] || ''
+  const locale = currency === 'INR' ? 'en-IN' : 'en-US'
+  return `${sym}${Number(n).toLocaleString(locale, { minimumFractionDigits: 2, maximumFractionDigits: 2, ...opts })}`
+}
+
 export const pct = (n) =>
   n == null || Number.isNaN(Number(n)) ? '—' : `${Number(n) >= 0 ? '+' : ''}${Number(n).toFixed(2)}%`
 

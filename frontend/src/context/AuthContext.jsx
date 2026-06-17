@@ -86,9 +86,11 @@ export function AuthProvider({ children }) {
         return
       }
 
-      // No request token: probe the backend so a page refresh stays logged in.
+      // No request token: probe the backend so a page refresh stays logged in. Use the
+      // selected provider's token endpoint (Paytm by default).
       try {
-        const r = await fetch(`${BACKEND_URL}/api/token`)
+        const tokenPath = provider === 'indmoney' ? '/api/indmoney/token' : '/api/token'
+        const r = await fetch(`${BACKEND_URL}${tokenPath}`)
         const d = r.ok ? await r.json() : null
         if (d?.public_access_token) setToken(d.public_access_token)
       } catch {

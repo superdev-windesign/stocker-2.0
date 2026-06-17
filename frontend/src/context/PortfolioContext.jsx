@@ -7,7 +7,7 @@ import {
   deleteTransactionApi,
   importTransactionsApi,
 } from '../services/ledgerApi'
-import { normalizeHoldings } from '../analytics/normalize'
+import { normalizeHoldingsFor } from '../analytics/normalize'
 import { buildAllJourneys } from '../analytics/ledger'
 import { DEMO_HOLDINGS, DEMO_ORDERS, DEMO_TRANSACTIONS, DEMO_EXITED_PRICES } from '../data/demoPortfolio'
 import { useAuth } from './AuthContext'
@@ -31,7 +31,8 @@ export function PortfolioProvider({ children }) {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [needsLogin, setNeedsLogin] = useState(false)
-  const { demo } = useAuth()
+  const { demo, provider } = useAuth()
+  const activeProvider = provider || 'paytm'
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -40,7 +41,7 @@ export function PortfolioProvider({ children }) {
 
     // Demo mode: serve dummy data through the same pipeline, no fetch.
     if (demo) {
-      setHoldings(normalizeHoldings(DEMO_HOLDINGS))
+      setHoldings(normalizeHoldingsFor('paytm', DEMO_HOLDINGS))
       setOrders(DEMO_ORDERS)
       setTransactions(DEMO_TRANSACTIONS.map((tx) => ({ ...tx, id: demoId(), createdAt: tx.date })))
       setFunds(null)
@@ -51,14 +52,14 @@ export function PortfolioProvider({ children }) {
 
     try {
       const [h, o, f, tx] = await Promise.allSettled([
-        fetchHoldings(),
-        fetchOrders(),
-        fetchFunds(),
+        fetchHoldings(activeProvider),
+        fetchOrders(activeProvider),
+        fetchFunds(activeProvider),
         fetchTransactions(),
       ])
 
       if (h.status === 'fulfilled') {
-        setHoldings(normalizeHoldings(h.value))
+        setHoldings(normalizeHoldingsFor(activeProvider, h.value))
         setHoldingsValue(h.value?.value || null)
       } else if (h.reason?.status === 401) {
         setNeedsLogin(true)
@@ -74,7 +75,7 @@ export function PortfolioProvider({ children }) {
     } finally {
       setLoading(false)
     }
-  }, [demo])
+  }, [demo, activeProvider])
 
   useEffect(() => {
     load()

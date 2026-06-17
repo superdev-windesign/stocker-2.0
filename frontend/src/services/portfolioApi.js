@@ -1,8 +1,28 @@
-// Thin fetch wrappers around the standalone Express backend's /api/* endpoints.
-// Dev defaults to the local backend on :5174; in production set VITE_BACKEND_URL
-// to the deployed backend's URL.
+// Thin fetch wrappers around the backend's data endpoints, provider-aware so the same
+// dashboard works for Paytm Money and INDmoney (INDstocks). The active provider selects
+// the path prefix; Paytm is the default to stay backward-compatible.
 const BACKEND_URL =
   import.meta.env.VITE_BACKEND_URL ?? (import.meta.env.DEV ? 'http://localhost:5174' : '')
+
+const PROVIDER_PATHS = {
+  paytm: {
+    holdings: '/api/holdings',
+    orders: '/api/orders',
+    positions: '/api/positions',
+    funds: '/api/funds',
+    profile: '/api/profile',
+    priceChart: '/api/price-chart',
+    quote: '/api/quote',
+  },
+  indmoney: {
+    holdings: '/api/indmoney/holdings',
+    quote: '/api/indmoney/quote',
+    priceChart: '/api/indmoney/historical',
+    // INDstocks has no direct equivalents for these in our read-only use — omitted.
+  },
+}
+
+const pathFor = (provider, key) => (PROVIDER_PATHS[provider] || PROVIDER_PATHS.paytm)[key]
 
 async function get(path, params) {
   const qs = params ? `?${new URLSearchParams(params)}` : ''
@@ -16,10 +36,13 @@ async function get(path, params) {
   return body
 }
 
-export const fetchHoldings = () => get('/api/holdings')
-export const fetchOrders = () => get('/api/orders')
-export const fetchPositions = () => get('/api/positions')
-export const fetchFunds = () => get('/api/funds')
-export const fetchProfile = () => get('/api/profile')
-export const fetchPriceChart = (params) => get('/api/price-chart', params)
-export const fetchQuote = (params) => get('/api/quote', params)
+// For endpoints a provider doesn't support, resolve to an empty value instead of erroring.
+const optional = (path, empty) => (path ? get(path) : Promise.resolve(empty))
+
+export const fetchHoldings = (provider = 'paytm') => get(pathFor(provider, 'holdings'))
+export const fetchOrders = (provider = 'paytm') => optional(pathFor(provider, 'orders'), [])
+export const fetchPositions = (provider = 'paytm') => optional(pathFor(provider, 'positions'), [])
+export const fetchFunds = (provider = 'paytm') => optional(pathFor(provider, 'funds'), null)
+export const fetchProfile = (provider = 'paytm') => optional(pathFor(provider, 'profile'), null)
+export const fetchPriceChart = (params, provider = 'paytm') => get(pathFor(provider, 'priceChart'), params)
+export const fetchQuote = (params, provider = 'paytm') => get(pathFor(provider, 'quote'), params)

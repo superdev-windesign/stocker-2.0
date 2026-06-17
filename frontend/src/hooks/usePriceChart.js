@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { fetchPriceChart } from '../services/portfolioApi'
 import { normalizeCandles } from '../analytics/stockMetrics'
+import { useAuth } from '../context/AuthContext'
 
 // Maps a UI timeframe to a Paytm interval + lookback window (days).
 const TF = {
@@ -26,6 +27,7 @@ export function usePriceChart(securityId, exchange = 'NSE', timeframe = '1Y') {
   const [candles, setCandles] = useState([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
+  const { provider } = useAuth()
 
   useEffect(() => {
     if (!securityId) return
@@ -36,13 +38,16 @@ export function usePriceChart(securityId, exchange = 'NSE', timeframe = '1Y') {
     let cancelled = false
     setLoading(true)
     setError(null)
-    fetchPriceChart({
-      security_id: securityId,
-      exchange,
-      interval,
-      from_date: ymd(from),
-      to_date: ymd(to),
-    })
+    fetchPriceChart(
+      {
+        security_id: securityId,
+        exchange,
+        interval,
+        from_date: ymd(from),
+        to_date: ymd(to),
+      },
+      provider || 'paytm',
+    )
       .then((raw) => {
         if (!cancelled) setCandles(normalizeCandles(raw))
       })
@@ -56,7 +61,7 @@ export function usePriceChart(securityId, exchange = 'NSE', timeframe = '1Y') {
     return () => {
       cancelled = true
     }
-  }, [securityId, exchange, timeframe])
+  }, [securityId, exchange, timeframe, provider])
 
   return { candles, loading, error }
 }
