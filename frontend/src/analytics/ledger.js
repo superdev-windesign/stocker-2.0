@@ -41,6 +41,7 @@ export function buildJourney(txns, ctx = {}) {
   let lowestBuy = null
   let highestSell = null
   let lowestSell = null
+  const realizedLots = [] // FIFO sale matches (for tax: { qty, buyPrice, buyDate, sellPrice, sellDate, gain })
 
   for (const t of list) {
     if (t.type === 'BUY') {
@@ -59,6 +60,14 @@ export function buildJourney(txns, ctx = {}) {
         const lot = lots[0]
         const matched = Math.min(remaining, lot.qty)
         realizedPnl += (t.price - lot.price) * matched
+        realizedLots.push({
+          qty: matched,
+          buyPrice: lot.price,
+          buyDate: lot.date,
+          sellPrice: t.price,
+          sellDate: t.date,
+          gain: (t.price - lot.price) * matched,
+        })
         lot.qty -= matched
         remaining -= matched
         if (lot.qty <= 1e-9) lots.shift()
@@ -114,6 +123,10 @@ export function buildJourney(txns, ctx = {}) {
     status, // HOLDING | EXITED | NONE
     txnCount: list.length,
     transactions: list,
+    // Open (unsold) FIFO lots — powers tax LT/ST classification & harvesting.
+    openLots: lots.map((l) => ({ ...l })),
+    // Matched sales (FIFO) — powers realized capital-gains tax by holding period.
+    realizedLots,
 
     firstBuyDate,
     lastBuyDate,

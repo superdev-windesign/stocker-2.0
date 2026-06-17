@@ -12,6 +12,7 @@ import RealizedProfit from '../components/dashboard/RealizedProfit'
 import AdvancedAnalytics from '../components/dashboard/AdvancedAnalytics'
 import InvestmentJourney from '../components/dashboard/InvestmentJourney'
 import SmartCounts from '../components/dashboard/SmartCounts'
+import RiskDashboard from '../components/dashboard/RiskDashboard'
 import AIInsights from '../components/dashboard/AIInsights'
 import ReentryOpportunities from '../components/dashboard/ReentryOpportunities'
 import TopMovers from '../components/dashboard/TopMovers'
@@ -87,6 +88,7 @@ export default function PortfolioDashboard() {
       )}
       <CountrySplit />
       <SmartCounts />
+      <RiskDashboard />
       <AIInsights />
       <AllocationCharts holdings={holdings} />
       <ReentryOpportunities />
