@@ -1,8 +1,9 @@
-import { Routes, Route, NavLink, useNavigate } from 'react-router-dom'
+import { Routes, Route, NavLink, useNavigate, useLocation } from 'react-router-dom'
 import { useAuth } from './context/AuthContext'
 import { PortfolioProvider } from './context/PortfolioContext'
 import { AlertsProvider } from './context/AlertsContext'
 import { ThemeToggle } from './components/common/ui'
+import ErrorBoundary from './components/ErrorBoundary'
 import NotificationBell from './components/NotificationBell'
 import TokenGate from './components/TokenGate'
 import PortfolioDashboard from './routes/PortfolioDashboard'
@@ -32,6 +33,7 @@ function NavTab({ to, children }) {
 function Layout({ children }) {
   const { logout, demo, setDemo } = useAuth()
   const navigate = useNavigate()
+  const location = useLocation()
   return (
     <div className="min-h-screen">
       <header className="sticky top-0 z-20 border-b border-slate-200 bg-white/80 backdrop-blur dark:border-white/10 dark:bg-[#0b0e11]/80">
@@ -76,7 +78,9 @@ function Layout({ children }) {
           </div>
         </div>
       </header>
-      <main className="mx-auto max-w-7xl px-4 py-6">{children}</main>
+      <main className="mx-auto max-w-7xl px-4 py-6">
+        <ErrorBoundary key={location.pathname}>{children}</ErrorBoundary>
+      </main>
     </div>
   )
 }

@@ -17,6 +17,10 @@ export default function PriceChartWithMarkers({ candles, avgPrice, markers = [] 
   const { theme } = useTheme()
 
   useEffect(() => {
+    // When there are no candles the component renders a placeholder without the chart
+    // container, so elRef.current is null — bail out (createChart(null) would throw and
+    // crash the whole route).
+    if (!elRef.current) return
     const chart = createChart(elRef.current, {
       layout: {
         background: { type: ColorType.Solid, color: 'transparent' },
