@@ -30,6 +30,24 @@ export const money = (n, currency = 'INR', opts = {}) => {
   return `${sym}${Number(n).toLocaleString(locale, { minimumFractionDigits: 2, maximumFractionDigits: 2, ...opts })}`
 }
 
+// Compact currency formatter — Indian L/Cr for INR, K/M/B otherwise.
+export const moneyCompact = (n, currency = 'INR') => {
+  if (n == null || Number.isNaN(Number(n))) return '—'
+  const v = Number(n)
+  const abs = Math.abs(v)
+  const sym = CURRENCY_SYMBOL[currency] || ''
+  if (currency === 'INR') {
+    if (abs >= 1e7) return `${sym}${(v / 1e7).toFixed(2)}Cr`
+    if (abs >= 1e5) return `${sym}${(v / 1e5).toFixed(2)}L`
+    if (abs >= 1e3) return `${sym}${(v / 1e3).toFixed(2)}K`
+    return `${sym}${v.toFixed(2)}`
+  }
+  if (abs >= 1e9) return `${sym}${(v / 1e9).toFixed(2)}B`
+  if (abs >= 1e6) return `${sym}${(v / 1e6).toFixed(2)}M`
+  if (abs >= 1e3) return `${sym}${(v / 1e3).toFixed(2)}K`
+  return `${sym}${v.toFixed(2)}`
+}
+
 export const pct = (n) =>
   n == null || Number.isNaN(Number(n)) ? '—' : `${Number(n) >= 0 ? '+' : ''}${Number(n).toFixed(2)}%`
 

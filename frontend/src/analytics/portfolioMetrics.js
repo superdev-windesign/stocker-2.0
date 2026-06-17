@@ -83,3 +83,32 @@ export function diversificationScore(holdings) {
 function sum(arr, key) {
   return arr.reduce((a, x) => a + (x[key] || 0), 0)
 }
+
+// Distinct currencies present in the portfolio (e.g. ['INR'] or ['INR','USD']).
+export function portfolioCurrencies(holdings) {
+  return [...new Set(holdings.map((h) => h.currency || 'INR'))]
+}
+
+// Per-currency summaries — used when a portfolio mixes markets (India ₹ + US $), since
+// summing across currencies without an FX rate would be meaningless.
+export function summarizeByCurrency(holdings) {
+  const byCur = {}
+  for (const h of holdings) {
+    const c = h.currency || 'INR'
+    ;(byCur[c] ||= []).push(h)
+  }
+  return Object.entries(byCur).map(([currency, hs]) => ({ currency, ...summarize(hs) }))
+}
+
+// Value + holding count grouped by country (India / US), each in its own currency.
+export function splitByCountry(holdings) {
+  const byCountry = {}
+  for (const h of holdings) {
+    const k = h.country || 'IN'
+    byCountry[k] ||= { country: k, currency: h.currency || 'INR', currentValue: 0, invested: 0, count: 0 }
+    byCountry[k].currentValue += h.currentValue || 0
+    byCountry[k].invested += h.invested || 0
+    byCountry[k].count += 1
+  }
+  return Object.values(byCountry).sort((a, b) => b.currentValue - a.currentValue)
+}

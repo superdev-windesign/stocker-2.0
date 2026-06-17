@@ -9,7 +9,14 @@ import {
 } from '../services/ledgerApi'
 import { normalizeHoldingsFor } from '../analytics/normalize'
 import { buildAllJourneys } from '../analytics/ledger'
-import { DEMO_HOLDINGS, DEMO_ORDERS, DEMO_TRANSACTIONS, DEMO_EXITED_PRICES } from '../data/demoPortfolio'
+import {
+  DEMO_HOLDINGS,
+  DEMO_ORDERS,
+  DEMO_TRANSACTIONS,
+  DEMO_EXITED_PRICES,
+  DEMO_US_HOLDINGS,
+  DEMO_US_TRANSACTIONS,
+} from '../data/demoPortfolio'
 import { useAuth } from './AuthContext'
 
 const PortfolioContext = createContext(null)
@@ -41,9 +48,11 @@ export function PortfolioProvider({ children }) {
 
     // Demo mode: serve dummy data through the same pipeline, no fetch.
     if (demo) {
-      setHoldings(normalizeHoldingsFor('paytm', DEMO_HOLDINGS))
+      setHoldings([...normalizeHoldingsFor('paytm', DEMO_HOLDINGS), ...DEMO_US_HOLDINGS])
       setOrders(DEMO_ORDERS)
-      setTransactions(DEMO_TRANSACTIONS.map((tx) => ({ ...tx, id: demoId(), createdAt: tx.date })))
+      setTransactions(
+        [...DEMO_TRANSACTIONS, ...DEMO_US_TRANSACTIONS].map((tx) => ({ ...tx, id: demoId(), createdAt: tx.date })),
+      )
       setFunds(null)
       setHoldingsValue(null)
       setLoading(false)

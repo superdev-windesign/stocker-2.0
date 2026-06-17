@@ -108,6 +108,8 @@ export function buildJourney(txns, ctx = {}) {
     name: ctx.name || list[0]?.name || ctx.symbol || '—',
     securityId: ctx.securityId ?? list[0]?.securityId ?? null,
     exchange: ctx.exchange || list[0]?.exchange || 'NSE',
+    currency: ctx.currency || list[0]?.currency || 'INR',
+    country: ctx.country || list[0]?.country || 'IN',
     sector: ctx.sector || null,
     status, // HOLDING | EXITED | NONE
     txnCount: list.length,
@@ -177,6 +179,8 @@ export function buildAllJourneys(transactions, holdings = [], priceMap = {}) {
         name: h?.name,
         securityId: h?.securityId ?? txns.find((t) => t.securityId)?.securityId ?? null,
         exchange: h?.exchange,
+        currency: h?.currency ?? txns.find((t) => t.currency)?.currency,
+        country: h?.country ?? txns.find((t) => t.country)?.country,
         sector: h?.sector,
         lastPrice,
       }),

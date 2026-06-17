@@ -1,5 +1,5 @@
 import { Card } from '../common/ui'
-import { inrCompact, inr, pct, signClass } from '../../analytics/format'
+import { money, moneyCompact, pct, signClass } from '../../analytics/format'
 
 function Metric({ label, value, sub, subClass, accent }) {
   return (
@@ -13,23 +13,23 @@ function Metric({ label, value, sub, subClass, accent }) {
   )
 }
 
-export default function SummaryCards({ summary }) {
+export default function SummaryCards({ summary, currency = 'INR' }) {
   const s = summary
   return (
     <div>
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-5">
-        <Metric label="Total Investment" value={`₹${inr(s.totalInvested)}`} sub={inrCompact(s.totalInvested)} />
-        <Metric label="Current Value" value={`₹${inr(s.currentValue)}`} sub={inrCompact(s.currentValue)} />
+        <Metric label="Total Investment" value={money(s.totalInvested, currency)} sub={moneyCompact(s.totalInvested, currency)} />
+        <Metric label="Current Value" value={money(s.currentValue, currency)} sub={moneyCompact(s.currentValue, currency)} />
         <Metric
           label="Total P&L"
-          value={`₹${inr(s.totalPnl)}`}
+          value={money(s.totalPnl, currency)}
           accent={signClass(s.totalPnl)}
           sub={pct(s.totalPnlPct)}
           subClass={signClass(s.totalPnlPct)}
         />
         <Metric
           label="Unrealized Gains"
-          value={`₹${inr(s.unrealizedGains)}`}
+          value={money(s.unrealizedGains, currency)}
           accent={signClass(s.unrealizedGains)}
         />
         <Metric label="Realized Gains" value="—" sub="needs tradebook" subClass="text-slate-400" />
@@ -37,7 +37,7 @@ export default function SummaryCards({ summary }) {
         <Metric label="Stocks Traded" value="—" sub="needs tradebook" subClass="text-slate-400" />
         <Metric
           label="Day's Change"
-          value={`₹${inr(s.dayChangeAbs)}`}
+          value={money(s.dayChangeAbs, currency)}
           accent={signClass(s.dayChangeAbs)}
           sub={pct(s.dayChangePct)}
           subClass={signClass(s.dayChangePct)}

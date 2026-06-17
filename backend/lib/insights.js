@@ -50,6 +50,10 @@ const pct = (n) => (n == null ? '—' : `${n >= 0 ? '+' : ''}${Number(n).toFixed
 // Deterministic, no-LLM summary built straight from the metrics payload (PRD style).
 export function heuristicInsight(p = {}, scope = 'DAILY') {
   const t = p.totals || {}
+  // Currency-aware amount formatter (shadows the INR default for USD portfolios).
+  const sym = { INR: '₹', USD: '$', EUR: '€', GBP: '£' }[p.currency] || '₹'
+  const inr = (n) =>
+    n == null ? '—' : `${sym}${Number(n).toLocaleString(p.currency === 'INR' ? 'en-IN' : 'en-US', { maximumFractionDigits: 0 })}`
   const lines = []
   lines.push(
     `Your portfolio is worth ${inr(t.currentValue)} (invested ${inr(t.invested)}) — overall P&L ${inr(t.totalPnl)} (${pct(t.totalPnlPct)}).`,

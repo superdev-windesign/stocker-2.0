@@ -2,7 +2,9 @@ import { useNavigate } from 'react-router-dom'
 import { Card, SectionTitle, StatPill } from '../common/ui'
 import DataTable from '../common/DataTable'
 import { allocationPct } from '../../analytics/portfolioMetrics'
-import { inr, signClass } from '../../analytics/format'
+import { money, signClass } from '../../analytics/format'
+
+const m = (v, r) => money(v, r.currency || 'INR')
 
 export default function HoldingsTable({ holdings }) {
   const navigate = useNavigate()
@@ -17,12 +19,12 @@ export default function HoldingsTable({ holdings }) {
     ) },
     { key: 'sector', label: 'Sector', render: (r) => <span className="text-xs">{r.sector}</span> },
     { key: 'quantity', label: 'Qty', align: 'right' },
-    { key: 'avgPrice', label: 'Avg', align: 'right', render: (r) => inr(r.avgPrice) },
-    { key: 'lastPrice', label: 'LTP', align: 'right', render: (r) => inr(r.lastPrice) },
-    { key: 'invested', label: 'Invested', align: 'right', render: (r) => inr(r.invested) },
-    { key: 'currentValue', label: 'Value', align: 'right', render: (r) => inr(r.currentValue) },
+    { key: 'avgPrice', label: 'Avg', align: 'right', render: (r) => m(r.avgPrice, r) },
+    { key: 'lastPrice', label: 'LTP', align: 'right', render: (r) => m(r.lastPrice, r) },
+    { key: 'invested', label: 'Invested', align: 'right', render: (r) => m(r.invested, r) },
+    { key: 'currentValue', label: 'Value', align: 'right', render: (r) => m(r.currentValue, r) },
     { key: 'pnl', label: 'P&L', align: 'right', render: (r) => (
-      <span className={signClass(r.pnl)}>{inr(r.pnl)}</span>
+      <span className={signClass(r.pnl)}>{m(r.pnl, r)}</span>
     ) },
     { key: 'pnlPct', label: 'P&L %', align: 'right', render: (r) => <StatPill value={r.pnlPct} /> },
     { key: 'dayChangePct', label: 'Day %', align: 'right', render: (r) => <StatPill value={r.dayChangePct} /> },

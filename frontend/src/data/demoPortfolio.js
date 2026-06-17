@@ -82,3 +82,35 @@ export const DEMO_TRANSACTIONS = [
 export const DEMO_EXITED_PRICES = {
   WIPRO: 248.5, // well below the ₹420 last exit → shows as a re-entry opportunity
 }
+
+// A couple of US holdings (already in normalized shape, USD/US) so demo mode showcases
+// multi-market support: the India/US country split + USD ($) formatting.
+const usHolding = (symbol, securityId, name, quantity, avgPrice, lastPrice, prevClose, sector) => {
+  const invested = quantity * avgPrice
+  const currentValue = quantity * lastPrice
+  const pnl = currentValue - invested
+  return {
+    securityId, symbol, name, exchange: 'NASDAQ', isin: null, instrument: 'EQUITY',
+    quantity, avgPrice, lastPrice, prevClose, invested, currentValue,
+    pnl, pnlPct: invested ? (pnl / invested) * 100 : null,
+    dayChangeAbs: (lastPrice - prevClose) * quantity,
+    dayChangePct: prevClose ? ((lastPrice - prevClose) / prevClose) * 100 : null,
+    sector, industry: null, cap: 'Large', currency: 'USD', country: 'US',
+  }
+}
+
+export const DEMO_US_HOLDINGS = [
+  usHolding('AAPL', 'US-AAPL', 'Apple Inc.', 15, 150, 212.4, 209.1, 'Technology'),
+  usHolding('TSLA', 'US-TSLA', 'Tesla Inc.', 8, 240, 205.3, 210.8, 'Auto'),
+]
+
+const ut = (symbol, name, securityId, type, date, quantity, price, notes = null) => ({
+  symbol, name, securityId, exchange: 'NASDAQ', type, date, quantity, price, notes,
+  source: 'manual', currency: 'USD', country: 'US',
+})
+
+export const DEMO_US_TRANSACTIONS = [
+  ut('AAPL', 'Apple Inc.', 'US-AAPL', 'BUY', '2023-02-01', 10, 140),
+  ut('AAPL', 'Apple Inc.', 'US-AAPL', 'BUY', '2023-09-15', 5, 170, 'Added after earnings'),
+  ut('TSLA', 'Tesla Inc.', 'US-TSLA', 'BUY', '2023-05-10', 8, 240, 'US growth bet'),
+]

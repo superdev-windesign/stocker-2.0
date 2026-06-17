@@ -1,8 +1,9 @@
 import { useMemo } from 'react'
 import { usePortfolio } from '../context/PortfolioContext'
-import { summarize } from '../analytics/portfolioMetrics'
+import { summarize, summarizeByCurrency, portfolioCurrencies } from '../analytics/portfolioMetrics'
 import { Card, EmptyState, Skeleton } from '../components/common/ui'
 import SummaryCards from '../components/dashboard/SummaryCards'
+import CountrySplit from '../components/dashboard/CountrySplit'
 import HoldingsTable from '../components/dashboard/HoldingsTable'
 import AllocationCharts from '../components/dashboard/AllocationCharts'
 import PerformanceTimeline from '../components/dashboard/PerformanceTimeline'
@@ -22,6 +23,9 @@ const BACKEND_URL =
 export default function PortfolioDashboard() {
   const { holdings, orders, loading, error, needsLogin } = usePortfolio()
   const summary = useMemo(() => summarize(holdings), [holdings])
+  const currencies = useMemo(() => portfolioCurrencies(holdings), [holdings])
+  const byCurrency = useMemo(() => summarizeByCurrency(holdings), [holdings])
+  const multiCurrency = currencies.length > 1
 
   if (loading) {
     return (
@@ -71,7 +75,17 @@ export default function PortfolioDashboard() {
         <p className="text-sm text-slate-500 dark:text-slate-400">Your complete investment overview · Paytm Money</p>
       </div>
 
-      <SummaryCards summary={summary} />
+      {multiCurrency ? (
+        byCurrency.map((s) => (
+          <div key={s.currency}>
+            <div className="mb-2 text-sm font-semibold text-slate-500 dark:text-slate-400">{s.currency} holdings</div>
+            <SummaryCards summary={s} currency={s.currency} />
+          </div>
+        ))
+      ) : (
+        <SummaryCards summary={summary} currency={currencies[0] || 'INR'} />
+      )}
+      <CountrySplit />
       <SmartCounts />
       <AIInsights />
       <AllocationCharts holdings={holdings} />
