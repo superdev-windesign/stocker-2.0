@@ -30,6 +30,9 @@ import {
 } from './lib/ledger.js'
 import { listSnapshots } from './lib/nav.js'
 import * as indmoney from './lib/indmoney.js'
+import { listAlerts, addAlert, updateAlertStatus, deleteAlert, evaluateAlerts } from './lib/alerts.js'
+import { listNotifications, markRead, markAllRead, notify } from './lib/notifications.js'
+import { startScheduler } from './lib/scheduler.js'
 
 const PORT = Number(process.env.PORT || 5174)
 const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:5173'
@@ -213,7 +216,38 @@ app.get('/api/indmoney/token/retrieve', indmoneyHandler(() => indmoney.getToken(
 app.get('/api/indmoney/holdings', indmoneyHandler(() => indmoney.getHoldings()))
 app.get('/api/indmoney/quote', indmoneyHandler((req) => indmoney.getQuote(req.query)))
 
+// ── Alert engine + notifications (Phase 4) ───────────────────────────────────
+app.get('/api/alerts', ledgerHandler(() => listAlerts()))
+app.post('/api/alerts', ledgerHandler((req) => addAlert(req.body)))
+app.post('/api/alerts/:id/pause', ledgerHandler((req) => updateAlertStatus(req.params.id, 'PAUSED')))
+app.post('/api/alerts/:id/resume', ledgerHandler((req) => updateAlertStatus(req.params.id, 'ACTIVE')))
+app.delete('/api/alerts/:id', ledgerHandler(async (req) => {
+  await deleteAlert(req.params.id)
+  return { ok: true }
+}))
+
+// Manual evaluation — drives the engine end-to-end without the scheduler/network.
+// Body: { priceMap: { SYMBOL: { last, changePct, high52, low52 } }, portfolioPnlPct }
+app.post('/api/alerts/evaluate-now', ledgerHandler(async (req) => {
+  const fired = await evaluateAlerts(req.body?.priceMap || {}, { portfolioPnlPct: req.body?.portfolioPnlPct })
+  for (const f of fired) {
+    await notify(f.alert.channels, { title: f.title, body: f.body, symbol: f.alert.symbol, alertId: f.alert.id, kind: 'ALERT' })
+  }
+  return { fired: fired.map((f) => ({ id: f.alert.id, title: f.title })) }
+}))
+
+app.get('/api/notifications', ledgerHandler(() => listNotifications()))
+app.post('/api/notifications/read', ledgerHandler(async (req) => {
+  await markRead(req.body?.id)
+  return { ok: true }
+}))
+app.post('/api/notifications/read-all', ledgerHandler(async () => {
+  await markAllRead()
+  return { ok: true }
+}))
+
 app.listen(PORT, () => {
   console.log(`\n[stocker] token helper running on http://localhost:${PORT}`)
   console.log(`[stocker] Start login at: http://localhost:${PORT}/api/login\n`)
+  startScheduler()
 })

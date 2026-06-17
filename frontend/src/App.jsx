@@ -1,12 +1,15 @@
 import { Routes, Route, NavLink, useNavigate } from 'react-router-dom'
 import { useAuth } from './context/AuthContext'
 import { PortfolioProvider } from './context/PortfolioContext'
+import { AlertsProvider } from './context/AlertsContext'
 import { ThemeToggle } from './components/common/ui'
+import NotificationBell from './components/NotificationBell'
 import TokenGate from './components/TokenGate'
 import PortfolioDashboard from './routes/PortfolioDashboard'
 import StockDetail from './routes/StockDetail'
 import LivePage from './routes/LivePage'
 import Ledger from './routes/Ledger'
+import Alerts from './routes/Alerts'
 
 function NavTab({ to, children }) {
   return (
@@ -47,9 +50,11 @@ function Layout({ children }) {
           <nav className="flex items-center gap-1">
             <NavTab to="/">Portfolio</NavTab>
             <NavTab to="/ledger">Ledger</NavTab>
+            <NavTab to="/alerts">Alerts</NavTab>
             <NavTab to="/live">Live</NavTab>
           </nav>
           <div className="flex items-center gap-2">
+            <NotificationBell />
             <button
               onClick={() => setDemo(!demo)}
               title="Toggle demo data"
@@ -93,14 +98,17 @@ export default function App() {
 
   return (
     <PortfolioProvider>
-      <Layout>
-        <Routes>
-          <Route path="/" element={<PortfolioDashboard />} />
-          <Route path="/ledger" element={<Ledger />} />
-          <Route path="/stock/:securityId" element={<StockDetail />} />
-          <Route path="/live" element={<LivePage />} />
-        </Routes>
-      </Layout>
+      <AlertsProvider>
+        <Layout>
+          <Routes>
+            <Route path="/" element={<PortfolioDashboard />} />
+            <Route path="/ledger" element={<Ledger />} />
+            <Route path="/alerts" element={<Alerts />} />
+            <Route path="/stock/:securityId" element={<StockDetail />} />
+            <Route path="/live" element={<LivePage />} />
+          </Routes>
+        </Layout>
+      </AlertsProvider>
     </PortfolioProvider>
   )
 }

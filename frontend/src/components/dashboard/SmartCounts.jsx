@@ -1,5 +1,6 @@
 import { useMemo } from 'react'
 import { usePortfolio } from '../../context/PortfolioContext'
+import { useAlerts } from '../../context/AlertsContext'
 import { heldStocks, fullyExited, reentryOpportunities } from '../../analytics/opportunities'
 import { Card } from '../common/ui'
 
@@ -19,6 +20,8 @@ function Tile({ label, value, hint, tone }) {
  */
 export default function SmartCounts() {
   const { journeys } = usePortfolio()
+  const { alerts } = useAlerts()
+  const activeAlerts = alerts.filter((a) => a.status === 'ACTIVE').length
   const { held, exited, reentry, inZone } = useMemo(() => {
     const j = journeys || []
     const re = reentryOpportunities(j)
@@ -36,7 +39,7 @@ export default function SmartCounts() {
       <Tile label="Fully Exited" value={exited} hint="completely sold out" />
       <Tile label="Below Last Sell" value={reentry} hint="trading under your exit" tone={reentry ? 'text-down' : undefined} />
       <Tile label="Near Re-Entry Zone" value={inZone} hint="within suggested band" tone={inZone ? 'text-up' : undefined} />
-      <Tile label="Upcoming Alerts" value="—" hint="alerts arrive in Phase 4" />
+      <Tile label="Active Alerts" value={activeAlerts} hint="watching your prices" tone={activeAlerts ? 'text-indigo-500' : undefined} />
     </div>
   )
 }

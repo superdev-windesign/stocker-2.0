@@ -58,6 +58,29 @@ export default function ReentryOpportunities() {
           <span className="text-xs text-slate-400">Watching</span>
         ),
     },
+    {
+      key: 'alert',
+      label: '',
+      align: 'right',
+      sortable: false,
+      render: (r) => (
+        <button
+          onClick={(e) => {
+            e.stopPropagation()
+            const q = new URLSearchParams({
+              type: 'REENTRY_ZONE',
+              symbol: r.symbol,
+              threshold: String(Math.round(r.lastSellPrice)),
+              ...(r.securityId ? { securityId: String(r.securityId) } : {}),
+            })
+            navigate(`/alerts?${q}`)
+          }}
+          className="rounded-md border border-indigo-500/40 px-2 py-1 text-xs font-medium text-indigo-500 hover:bg-indigo-500/10"
+        >
+          + Alert
+        </button>
+      ),
+    },
   ]
 
   return (
