@@ -11,6 +11,7 @@ import RealizedProfit from '../components/dashboard/RealizedProfit'
 import AdvancedAnalytics from '../components/dashboard/AdvancedAnalytics'
 import InvestmentJourney from '../components/dashboard/InvestmentJourney'
 import SmartCounts from '../components/dashboard/SmartCounts'
+import AIInsights from '../components/dashboard/AIInsights'
 import ReentryOpportunities from '../components/dashboard/ReentryOpportunities'
 import TopMovers from '../components/dashboard/TopMovers'
 import RecentTransactions from '../components/dashboard/RecentTransactions'
@@ -72,6 +73,7 @@ export default function PortfolioDashboard() {
 
       <SummaryCards summary={summary} />
       <SmartCounts />
+      <AIInsights />
       <AllocationCharts holdings={holdings} />
       <ReentryOpportunities />
       <RealizedProfit />

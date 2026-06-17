@@ -33,6 +33,7 @@ import * as indmoney from './lib/indmoney.js'
 import { listAlerts, addAlert, updateAlertStatus, deleteAlert, evaluateAlerts } from './lib/alerts.js'
 import { listNotifications, markRead, markAllRead, notify } from './lib/notifications.js'
 import { startScheduler } from './lib/scheduler.js'
+import { generateInsight } from './lib/insights.js'
 
 const PORT = Number(process.env.PORT || 5174)
 const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:5173'
@@ -245,6 +246,12 @@ app.post('/api/notifications/read-all', ledgerHandler(async () => {
   await markAllRead()
   return { ok: true }
 }))
+
+// ── AI Portfolio Analyst (Phase 5) ───────────────────────────────────────────
+// Body: { scope: 'daily'|'weekly', payload: <compact metrics>, refresh?: bool }
+app.post('/api/insights', ledgerHandler((req) =>
+  generateInsight(req.body?.scope || 'daily', req.body?.payload || {}, { refresh: !!req.body?.refresh }),
+))
 
 app.listen(PORT, () => {
   console.log(`\n[stocker] token helper running on http://localhost:${PORT}`)
