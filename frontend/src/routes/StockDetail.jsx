@@ -11,6 +11,7 @@ import BuySellTimeline from '../components/stock/BuySellTimeline'
 import PerformanceMetrics from '../components/stock/PerformanceMetrics'
 import AthAtlSection from '../components/stock/AthAtlSection'
 import StockJourney from '../components/stock/StockJourney'
+import StockTradebook from '../components/stock/StockTradebook'
 
 export default function StockDetail() {
   const { securityId } = useParams()
@@ -97,6 +98,8 @@ export default function StockDetail() {
       <StockHeader holding={subject} />
 
       {journey && <StockJourney journey={journey} />}
+
+      {journey && <StockTradebook transactions={journey.transactions} currency={journey.currency} />}
 
       <Card className="p-4">
         <SectionTitle
