@@ -12,6 +12,7 @@ import LivePage from './routes/LivePage'
 import Ledger from './routes/Ledger'
 import Alerts from './routes/Alerts'
 import Tax from './routes/Tax'
+import Rebalance from './routes/Rebalance'
 
 function NavTab({ to, children }) {
   return (
@@ -54,6 +55,7 @@ function Layout({ children }) {
             <NavTab to="/">Portfolio</NavTab>
             <NavTab to="/ledger">Ledger</NavTab>
             <NavTab to="/tax">Tax</NavTab>
+            <NavTab to="/rebalance">Rebalance</NavTab>
             <NavTab to="/alerts">Alerts</NavTab>
             <NavTab to="/live">Live</NavTab>
           </nav>
@@ -110,6 +112,7 @@ export default function App() {
             <Route path="/" element={<PortfolioDashboard />} />
             <Route path="/ledger" element={<Ledger />} />
             <Route path="/tax" element={<Tax />} />
+            <Route path="/rebalance" element={<Rebalance />} />
             <Route path="/alerts" element={<Alerts />} />
             <Route path="/stock/:securityId" element={<StockDetail />} />
             <Route path="/live" element={<LivePage />} />
