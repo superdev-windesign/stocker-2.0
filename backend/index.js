@@ -34,6 +34,7 @@ import { listAlerts, addAlert, updateAlertStatus, deleteAlert, evaluateAlerts } 
 import { listNotifications, markRead, markAllRead, notify } from './lib/notifications.js'
 import { startScheduler } from './lib/scheduler.js'
 import { generateInsight } from './lib/insights.js'
+import { runAgent } from './lib/agent.js'
 
 const PORT = Number(process.env.PORT || 5174)
 const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:5173'
@@ -251,6 +252,11 @@ app.post('/api/notifications/read-all', ledgerHandler(async () => {
 // Body: { scope: 'daily'|'weekly', payload: <compact metrics>, refresh?: bool }
 app.post('/api/insights', ledgerHandler((req) =>
   generateInsight(req.body?.scope || 'daily', req.body?.payload || {}, { refresh: !!req.body?.refresh }),
+))
+
+// Agentic Copilot — tool-calling chat grounded in the portfolio snapshot.
+app.post('/api/agent', ledgerHandler((req) =>
+  runAgent(req.body?.message || '', req.body?.context || {}, req.body?.history || []),
 ))
 
 app.listen(PORT, () => {

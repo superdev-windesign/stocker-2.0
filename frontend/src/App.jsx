@@ -13,6 +13,7 @@ import Ledger from './routes/Ledger'
 import Alerts from './routes/Alerts'
 import Tax from './routes/Tax'
 import Rebalance from './routes/Rebalance'
+import Copilot from './routes/Copilot'
 
 function NavTab({ to, children }) {
   return (
@@ -53,6 +54,7 @@ function Layout({ children }) {
           </button>
           <nav className="flex items-center gap-1">
             <NavTab to="/">Portfolio</NavTab>
+            <NavTab to="/copilot">Copilot</NavTab>
             <NavTab to="/ledger">Ledger</NavTab>
             <NavTab to="/tax">Tax</NavTab>
             <NavTab to="/rebalance">Rebalance</NavTab>
@@ -110,6 +112,7 @@ export default function App() {
         <Layout>
           <Routes>
             <Route path="/" element={<PortfolioDashboard />} />
+            <Route path="/copilot" element={<Copilot />} />
             <Route path="/ledger" element={<Ledger />} />
             <Route path="/tax" element={<Tax />} />
             <Route path="/rebalance" element={<Rebalance />} />
