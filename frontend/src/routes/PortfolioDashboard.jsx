@@ -3,6 +3,7 @@ import { usePortfolio } from '../context/PortfolioContext'
 import { summarize, summarizeByCurrency, portfolioCurrencies } from '../analytics/portfolioMetrics'
 import { Card, EmptyState, Skeleton } from '../components/common/ui'
 import SummaryCards from '../components/dashboard/SummaryCards'
+import LifetimeSummary from '../components/dashboard/LifetimeSummary'
 import CountrySplit from '../components/dashboard/CountrySplit'
 import HoldingsTable from '../components/dashboard/HoldingsTable'
 import AllocationCharts from '../components/dashboard/AllocationCharts'
@@ -86,6 +87,7 @@ export default function PortfolioDashboard() {
       ) : (
         <SummaryCards summary={summary} currency={currencies[0] || 'INR'} />
       )}
+      <LifetimeSummary />
       <CountrySplit />
       <SmartCounts />
       <RiskDashboard />

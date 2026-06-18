@@ -91,9 +91,46 @@ export function recentTransactions(transactions = [], n = 8) {
 }
 
 /**
- * Realized-P&L rollup across all journeys (powers the RealizedProfit widget).
- * Counts stocks that have at least one sell (timesSold > 0).
+ * All-time portfolio totals across every stock's journey, grouped by currency (so INR
+ * and USD aren't summed together). Lifetime invested/exit/realized/unrealized + net.
  */
+export function lifetimeSummary(journeys = []) {
+  const byCur = {}
+  for (const j of journeys) {
+    const c = j.currency || 'INR'
+    const g = (byCur[c] ||= {
+      currency: c,
+      invested: 0, // lifetime gross invested (Σ all buys)
+      exitValue: 0, // lifetime gross exit value (Σ all sells)
+      realized: 0,
+      unrealized: 0,
+      openCost: 0, // cost basis of stock still held
+      currentValue: 0,
+      stocks: 0,
+      held: 0,
+      exited: 0,
+      winners: 0,
+      losers: 0,
+    })
+    g.invested += j.totalInvestment || 0
+    g.exitValue += j.totalExitValue || 0
+    g.realized += j.realizedPnl || 0
+    g.unrealized += j.unrealizedPnl || 0
+    g.openCost += j.openCost || 0
+    g.currentValue += j.currentValue || 0
+    g.stocks += 1
+    if (j.status === 'HOLDING') g.held += 1
+    else if (j.status === 'EXITED') g.exited += 1
+    const net = (j.realizedPnl || 0) + (j.unrealizedPnl || 0)
+    if (net > 0) g.winners += 1
+    else if (net < 0) g.losers += 1
+  }
+  return Object.values(byCur).map((g) => ({
+    ...g,
+    netPnl: g.realized + g.unrealized,
+    returnPct: g.invested ? ((g.realized + g.unrealized) / g.invested) * 100 : null,
+  }))
+}
 export function realizedSummary(journeys = []) {
   const closed = journeys.filter((j) => j.timesSold > 0)
   let gains = 0
