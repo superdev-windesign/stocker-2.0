@@ -61,7 +61,12 @@ async function runTool(name, args, actions) {
   return { error: `unknown tool ${name}` }
 }
 
-async function chat(messages) {
+async function chat(messages, { useTools = true } = {}) {
+  const body = { model: MODEL, messages, temperature: 0.3, max_tokens: 1000 }
+  if (useTools) {
+    body.tools = TOOLS
+    body.tool_choice = 'auto'
+  }
   const resp = await fetch('https://openrouter.ai/api/v1/chat/completions', {
     method: 'POST',
     headers: {
@@ -70,12 +75,19 @@ async function chat(messages) {
       'X-Title': SITE_NAME,
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({ model: MODEL, messages, tools: TOOLS, tool_choice: 'auto', temperature: 0.3, max_tokens: 800 }),
+    body: JSON.stringify(body),
   })
-  if (!resp.ok) throw new Error(`OpenRouter ${resp.status}: ${await resp.text()}`)
+  if (!resp.ok) {
+    const err = new Error(`OpenRouter ${resp.status}: ${await resp.text()}`)
+    err.status = resp.status
+    throw err
+  }
   const data = await resp.json()
-  return data?.choices?.[0]?.message
+  return data?.choices?.[0]?.message || {}
 }
+
+// Thinking models may return the answer in `reasoning` if `content` is empty.
+const answerOf = (msg) => (msg?.content && msg.content.trim()) || (msg?.reasoning && msg.reasoning.trim()) || ''
 
 const SYSTEM =
   'You are Stocker Copilot, an agentic portfolio assistant for an Indian retail investor (amounts in ' +
@@ -111,20 +123,23 @@ export async function runAgent(message, context = {}, history = []) {
     return { reply: heuristicReply(message, context), actions, model: 'heuristic' }
   }
 
-  const messages = [
+  const baseMessages = [
     { role: 'system', content: SYSTEM },
     { role: 'system', content: `Portfolio snapshot (JSON):\n${JSON.stringify(context)}` },
     ...history.slice(-8).map((h) => ({ role: h.role, content: h.content })),
     { role: 'user', content: message },
   ]
+  const messages = [...baseMessages]
 
   try {
     for (let step = 0; step < MAX_STEPS; step++) {
-      const msg = await chat(messages)
+      const msg = await chat(messages, { useTools: true })
       messages.push(msg)
       const calls = msg.tool_calls || []
       if (!calls.length) {
-        return { reply: msg.content || '(no response)', actions, model: MODEL }
+        const text = answerOf(msg)
+        if (text) return { reply: text, actions, model: MODEL }
+        break // empty answer — fall through to no-tools retry
       }
       for (const call of calls) {
         let args = {}
@@ -137,9 +152,18 @@ export async function runAgent(message, context = {}, history = []) {
         messages.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify(result) })
       }
     }
-    return { reply: 'I took several steps but ran out of room — please refine your question.', actions, model: MODEL }
   } catch (err) {
-    console.error('[stocker] agent error:', err.message)
-    return { reply: heuristicReply(message, context), actions, model: 'heuristic', error: err.message }
+    console.error('[stocker] agent (tools) failed, retrying without tools:', err.message)
   }
+
+  // Fallback: many small/free models (incl. thinking models) don't support tool-calling.
+  // Retry as a plain grounded chat so the Copilot still answers (just can't take actions).
+  try {
+    const msg = await chat(baseMessages, { useTools: false })
+    const text = answerOf(msg)
+    if (text) return { reply: text, actions, model: MODEL }
+  } catch (err) {
+    console.error('[stocker] agent (no-tools) failed:', err.message)
+  }
+  return { reply: heuristicReply(message, context), actions, model: 'heuristic' }
 }

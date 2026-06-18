@@ -107,12 +107,14 @@ async function callOpenRouter(payload, scope) {
         { role: 'user', content: `Portfolio metrics (JSON):\n${JSON.stringify(payload)}` },
       ],
       temperature: 0.4,
-      max_tokens: 700,
+      max_tokens: 1100,
     }),
   })
   if (!resp.ok) throw new Error(`OpenRouter ${resp.status}: ${await resp.text()}`)
   const data = await resp.json()
-  const text = data?.choices?.[0]?.message?.content?.trim()
+  const msg = data?.choices?.[0]?.message || {}
+  // Thinking models may put the answer in `reasoning` when `content` is empty.
+  const text = (msg.content && msg.content.trim()) || (msg.reasoning && msg.reasoning.trim())
   if (!text) throw new Error('OpenRouter returned no content')
   return text
 }
