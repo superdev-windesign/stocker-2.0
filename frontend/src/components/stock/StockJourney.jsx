@@ -71,6 +71,12 @@ export default function StockJourney({ journey }) {
         />
 
         <Stat
+          label="Lifetime P&L"
+          value={m(j.totalPnl)}
+          tone={signClass(j.totalPnl)}
+          sub="realized + unrealized"
+        />
+        <Stat
           label="Realized Profit"
           value={m(j.realizedPnl)}
           tone={signClass(j.realizedPnl)}
