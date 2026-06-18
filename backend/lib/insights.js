@@ -9,7 +9,7 @@ import { createHash } from 'node:crypto'
 import { db } from './paytm.js'
 
 const OPENROUTER_KEY = process.env.OPENROUTER_API_KEY
-const MODEL = process.env.OPENROUTER_MODEL || 'openai/gpt-4o'
+const MODEL = process.env.OPENROUTER_MODEL || 'liquid/lfm-2.5-1.2b-thinking:free'
 const SITE_URL = process.env.OPENROUTER_SITE_URL || 'https://stocker-2-0-frontend.vercel.app'
 const SITE_NAME = process.env.OPENROUTER_SITE_NAME || 'Stocker'
 
