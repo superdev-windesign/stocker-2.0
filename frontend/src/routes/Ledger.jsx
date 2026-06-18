@@ -72,10 +72,15 @@ function rowToTxn(row) {
     get('type', 'side', 'transactiontype', 'buysell', 'ordertype', 'tradetype', 'b', 'buyorsell') || '',
   ).toUpperCase()
   const type = rawType.startsWith('S') ? 'SELL' : 'BUY'
+  // Unique trade id for de-dup (prefer Trade Number; fall back to Order Number).
+  const tradeNo = String(get('tradenumber', 'tradeno', 'tradeid') || '').trim()
+  const orderNo = String(get('ordernumber', 'orderno', 'orderid') || '').trim()
+  const extId = tradeNo && tradeNo !== '0' ? tradeNo : orderNo && orderNo !== '0' ? orderNo : null
   return {
     symbol: String(get('symbol', 'script', 'tradingsymbol', 'scrip', 'scripname', 'nsesymbol', 'instrument', 'stock', 'security') || '')
       .trim()
       .toUpperCase(),
+    isin: String(get('isin', 'isincode') || '').trim() || null,
     name: get('name', 'companyname', 'displayname') || null,
     exchange: String(get('exchange', 'exchangesegment', 'exch') || 'NSE').toUpperCase(),
     type,
@@ -85,11 +90,22 @@ function rowToTxn(row) {
     charges: sumCharges(row),
     notes: get('notes', 'remarks') || null,
     source: 'csv',
+    extId,
   }
 }
 
+// Some BSE trades carry a numeric scrip CODE in "Script" instead of a ticker. Map those
+// to a real symbol via ISIN, using the user's holdings + any alpha-named rows in the file.
+function remapNumericSymbols(rows, holdings) {
+  const isNumeric = (s) => /^\d+$/.test(String(s))
+  const isinToSymbol = {}
+  for (const h of holdings || []) if (h.isin && h.symbol && !isNumeric(h.symbol)) isinToSymbol[h.isin] = h.symbol
+  for (const r of rows) if (r.isin && !isNumeric(r.symbol)) isinToSymbol[r.isin] = r.symbol
+  return rows.map((r) => (isNumeric(r.symbol) && r.isin && isinToSymbol[r.isin] ? { ...r, symbol: isinToSymbol[r.isin] } : r))
+}
+
 export default function Ledger() {
-  const { transactions, holdings, addTxn, editTxn, removeTxn, importTxns, clearSyncedBaseline } = usePortfolio()
+  const { transactions, holdings, addTxn, editTxn, removeTxn, importTxns, clearSyncedBaseline, clearAllTxns } = usePortfolio()
   const hasBaseline = transactions.some((t) => t.source === 'paytm')
   const [form, setForm] = useState(BLANK)
   const [editingId, setEditingId] = useState(null)
@@ -192,9 +208,10 @@ export default function Ledger() {
     setMsg(null)
     try {
       const aoa = await parseRows(file)
-      const rows = aoaToObjects(aoa)
+      const parsed = aoaToObjects(aoa)
         .map(rowToTxn)
         .filter((t) => t.symbol && t.quantity > 0 && t.date)
+      const rows = remapNumericSymbols(parsed, holdings)
       if (!rows.length) {
         setMsg({ type: 'error', text: 'No valid rows found. Expected a tradebook with Date / Script / Type / Quantity / Price columns. Paste me the header row if it won’t parse.' })
       } else {
@@ -213,10 +230,10 @@ export default function Ledger() {
     setMsg(null)
     try {
       const r = await importTxns(preview.rows)
-      setMsg({
-        type: 'ok',
-        text: `Imported ${r?.added ?? preview.rows.length} transactions${r?.replacedBaseline ? `, replaced ${r.replacedBaseline} Paytm baseline entr${r.replacedBaseline === 1 ? 'y' : 'ies'}` : ''}.`,
-      })
+      const parts = [`Imported ${r?.added ?? preview.rows.length} transactions`]
+      if (r?.skipped) parts.push(`skipped ${r.skipped} already-imported`)
+      if (r?.replacedBaseline) parts.push(`replaced ${r.replacedBaseline} Paytm baseline`)
+      setMsg({ type: 'ok', text: `${parts.join(', ')}.` })
       setPreview(null)
     } catch (err) {
       setMsg({ type: 'error', text: err.message })
@@ -371,7 +388,32 @@ export default function Ledger() {
       )}
 
       <Card className="p-4">
-        <SectionTitle title="All transactions" subtitle={`${transactions.length} total`} />
+        <SectionTitle
+          title="All transactions"
+          subtitle={`${transactions.length} total`}
+          right={
+            transactions.length > 0 && (
+              <button
+                onClick={async () => {
+                  if (!window.confirm(`Delete all ${transactions.length} transactions? This cannot be undone — re-import your tradebook afterwards.`)) return
+                  setBusy(true)
+                  setMsg(null)
+                  try {
+                    await clearAllTxns()
+                    setMsg({ type: 'ok', text: 'Cleared all transactions. Re-upload your tradebook for a clean import.' })
+                  } catch (err) {
+                    setMsg({ type: 'error', text: err.message })
+                  } finally {
+                    setBusy(false)
+                  }
+                }}
+                className="rounded-lg border border-down/40 px-3 py-1.5 text-xs font-medium text-down hover:bg-down/5"
+              >
+                Clear all
+              </button>
+            )
+          }
+        />
         {sorted.length === 0 ? (
           <EmptyState icon="🧾" title="No transactions yet" message="Add a trade above or import your tradebook CSV." />
         ) : (

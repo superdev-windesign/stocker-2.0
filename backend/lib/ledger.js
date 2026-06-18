@@ -23,14 +23,16 @@ async function ensureTable() {
       source      TEXT NOT NULL DEFAULT 'manual',  -- manual | csv | paytm
       currency    TEXT NOT NULL DEFAULT 'INR',
       country     TEXT NOT NULL DEFAULT 'IN',
+      ext_id      TEXT,                            -- broker trade/order id (for dedup)
       created_at  TEXT NOT NULL
     )
   `)
-  // Additive migration for DBs created before currency/country existed.
+  // Additive migration for DBs created before currency/country/ext_id existed.
   const info = await db.execute(`PRAGMA table_info(transactions)`)
   const cols = new Set(info.rows.map((r) => r.name))
   if (!cols.has('currency')) await db.execute(`ALTER TABLE transactions ADD COLUMN currency TEXT NOT NULL DEFAULT 'INR'`)
   if (!cols.has('country')) await db.execute(`ALTER TABLE transactions ADD COLUMN country TEXT NOT NULL DEFAULT 'IN'`)
+  if (!cols.has('ext_id')) await db.execute(`ALTER TABLE transactions ADD COLUMN ext_id TEXT`)
   tableReady = true
 }
 
@@ -50,6 +52,7 @@ const toApi = (r) => ({
   source: r.source,
   currency: r.currency || 'INR',
   country: r.country || 'IN',
+  extId: r.ext_id || null,
   createdAt: r.created_at,
 })
 
@@ -88,6 +91,7 @@ function clean(tx) {
     source: tx.source ? String(tx.source) : 'manual',
     currency,
     country,
+    extId: tx.extId != null && tx.extId !== '' ? String(tx.extId) : null,
   }
 }
 
@@ -105,9 +109,9 @@ export async function addTransaction(tx) {
   const createdAt = new Date().toISOString()
   await db.execute({
     sql: `INSERT INTO transactions
-            (id, security_id, symbol, name, exchange, type, date, quantity, price, charges, notes, source, currency, country, created_at)
-          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-    args: [id, c.securityId, c.symbol, c.name, c.exchange, c.type, c.date, c.quantity, c.price, c.charges, c.notes, c.source, c.currency, c.country, createdAt],
+            (id, security_id, symbol, name, exchange, type, date, quantity, price, charges, notes, source, currency, country, ext_id, created_at)
+          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+    args: [id, c.securityId, c.symbol, c.name, c.exchange, c.type, c.date, c.quantity, c.price, c.charges, c.notes, c.source, c.currency, c.country, c.extId, createdAt],
   })
   return { id, createdAt, ...c }
 }
@@ -139,29 +143,49 @@ export async function deleteTransaction(id) {
 // rows for that symbol, so importing your tradebook replaces the synced placeholder.
 export async function importTransactions(rows) {
   await ensureTable()
-  if (!Array.isArray(rows) || !rows.length) return { added: 0 }
+  if (!Array.isArray(rows) || !rows.length) return { added: 0, skipped: 0, replacedBaseline: 0 }
   const createdAt = new Date().toISOString()
-  const cleaned = rows.map(clean)
+  let cleaned = rows.map(clean)
 
+  // De-dup within the batch by ext_id (broker trade/order id) so the same row isn't
+  // inserted twice, and across the DB so re-uploading the same tradebook is idempotent.
+  const seen = new Set()
+  cleaned = cleaned.filter((c) => {
+    if (!c.extId) return true
+    if (seen.has(c.extId)) return false
+    seen.add(c.extId)
+    return true
+  })
+  const batchIds = [...seen]
+  let already = new Set()
+  for (let i = 0; i < batchIds.length; i += 400) {
+    const chunk = batchIds.slice(i, i + 400)
+    const ph = chunk.map(() => '?').join(',')
+    const r = await db.execute({ sql: `SELECT ext_id FROM transactions WHERE ext_id IN (${ph})`, args: chunk })
+    for (const row of r.rows) already.add(row.ext_id)
+  }
+  const toInsert = cleaned.filter((c) => !c.extId || !already.has(c.extId))
+  const skipped = rows.length - toInsert.length
+
+  // Real imports for a symbol supersede any approximate Paytm baseline for that symbol.
   let replacedBaseline = 0
-  const realSymbols = [...new Set(cleaned.filter((c) => c.source !== 'paytm').map((c) => c.symbol))]
+  const realSymbols = [...new Set(toInsert.filter((c) => c.source !== 'paytm').map((c) => c.symbol))]
   if (realSymbols.length) {
     const ph = realSymbols.map(() => '?').join(',')
-    const res = await db.execute({
-      sql: `DELETE FROM transactions WHERE source='paytm' AND symbol IN (${ph})`,
-      args: realSymbols,
-    })
+    const res = await db.execute({ sql: `DELETE FROM transactions WHERE source='paytm' AND symbol IN (${ph})`, args: realSymbols })
     replacedBaseline = res.rowsAffected || 0
   }
 
-  const stmts = cleaned.map((c) => ({
-    sql: `INSERT INTO transactions
-            (id, security_id, symbol, name, exchange, type, date, quantity, price, charges, notes, source, currency, country, created_at)
-          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-    args: [randomUUID(), c.securityId, c.symbol, c.name, c.exchange, c.type, c.date, c.quantity, c.price, c.charges, c.notes, c.source, c.currency, c.country, createdAt],
-  }))
-  await db.batch(stmts, 'write')
-  return { added: stmts.length, replacedBaseline }
+  if (toInsert.length) {
+    const stmts = toInsert.map((c) => ({
+      sql: `INSERT INTO transactions
+              (id, security_id, symbol, name, exchange, type, date, quantity, price, charges, notes, source, currency, country, ext_id, created_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      args: [randomUUID(), c.securityId, c.symbol, c.name, c.exchange, c.type, c.date, c.quantity, c.price, c.charges, c.notes, c.source, c.currency, c.country, c.extId, createdAt],
+    }))
+    await db.batch(stmts, 'write')
+  }
+  return { added: toInsert.length, skipped, replacedBaseline }
 }
 
 export async function clearTransactions() {

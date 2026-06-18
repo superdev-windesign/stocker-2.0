@@ -7,6 +7,7 @@ import {
   deleteTransactionApi,
   importTransactionsApi,
   clearBySourceApi,
+  clearTransactionsApi,
 } from '../services/ledgerApi'
 import { normalizeHoldingsFor } from '../analytics/normalize'
 import { buildAllJourneys } from '../analytics/ledger'
@@ -170,6 +171,19 @@ export function PortfolioProvider({ children }) {
     [demo, reloadTransactions],
   )
 
+  // Delete the entire ledger (used to reset after a messy/duplicated import).
+  const clearAllTxns = useCallback(
+    async () => {
+      if (demo) {
+        setTransactions([])
+        return
+      }
+      await clearTransactionsApi()
+      await reloadTransactions()
+    },
+    [demo, reloadTransactions],
+  )
+
   // Derived: one journey per distinct symbol across the whole ledger.
   const journeys = useMemo(
     () => buildAllJourneys(transactions, holdings, demo ? DEMO_EXITED_PRICES : {}),
@@ -202,6 +216,7 @@ export function PortfolioProvider({ children }) {
         removeTxn,
         importTxns,
         clearSyncedBaseline,
+        clearAllTxns,
       }}
     >
       {children}
