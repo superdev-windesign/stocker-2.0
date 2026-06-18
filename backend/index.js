@@ -27,6 +27,7 @@ import {
   deleteTransaction,
   importTransactions,
   clearTransactions,
+  clearTransactionsBySource,
 } from './lib/ledger.js'
 import { listSnapshots } from './lib/nav.js'
 import * as indmoney from './lib/indmoney.js'
@@ -191,6 +192,7 @@ app.delete('/api/transactions/:id', ledgerHandler(async (req) => {
   await deleteTransaction(req.params.id)
   return { ok: true }
 }))
+app.delete('/api/transactions/source/:source', ledgerHandler((req) => clearTransactionsBySource(req.params.source)))
 app.delete('/api/transactions', ledgerHandler(async () => {
   await clearTransactions()
   return { ok: true }

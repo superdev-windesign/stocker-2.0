@@ -135,24 +135,43 @@ export async function deleteTransaction(id) {
 }
 
 // Bulk insert (CSV import or Paytm sync). Returns how many rows were added.
+// Real imports (CSV/manual) for a symbol SUPERSEDE any approximate Paytm "baseline"
+// rows for that symbol, so importing your tradebook replaces the synced placeholder.
 export async function importTransactions(rows) {
   await ensureTable()
   if (!Array.isArray(rows) || !rows.length) return { added: 0 }
   const createdAt = new Date().toISOString()
-  const stmts = rows.map((tx) => {
-    const c = clean(tx)
-    return {
-      sql: `INSERT INTO transactions
-              (id, security_id, symbol, name, exchange, type, date, quantity, price, charges, notes, source, currency, country, created_at)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-      args: [randomUUID(), c.securityId, c.symbol, c.name, c.exchange, c.type, c.date, c.quantity, c.price, c.charges, c.notes, c.source, c.currency, c.country, createdAt],
-    }
-  })
+  const cleaned = rows.map(clean)
+
+  let replacedBaseline = 0
+  const realSymbols = [...new Set(cleaned.filter((c) => c.source !== 'paytm').map((c) => c.symbol))]
+  if (realSymbols.length) {
+    const ph = realSymbols.map(() => '?').join(',')
+    const res = await db.execute({
+      sql: `DELETE FROM transactions WHERE source='paytm' AND symbol IN (${ph})`,
+      args: realSymbols,
+    })
+    replacedBaseline = res.rowsAffected || 0
+  }
+
+  const stmts = cleaned.map((c) => ({
+    sql: `INSERT INTO transactions
+            (id, security_id, symbol, name, exchange, type, date, quantity, price, charges, notes, source, currency, country, created_at)
+          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+    args: [randomUUID(), c.securityId, c.symbol, c.name, c.exchange, c.type, c.date, c.quantity, c.price, c.charges, c.notes, c.source, c.currency, c.country, createdAt],
+  }))
   await db.batch(stmts, 'write')
-  return { added: stmts.length }
+  return { added: stmts.length, replacedBaseline }
 }
 
 export async function clearTransactions() {
   await ensureTable()
   await db.execute(`DELETE FROM transactions`)
+}
+
+// Clear only rows from a given source (e.g. 'paytm' baseline placeholders).
+export async function clearTransactionsBySource(source) {
+  await ensureTable()
+  const res = await db.execute({ sql: `DELETE FROM transactions WHERE source=?`, args: [source] })
+  return { deleted: res.rowsAffected || 0 }
 }

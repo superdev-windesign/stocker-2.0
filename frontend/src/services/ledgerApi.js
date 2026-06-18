@@ -24,3 +24,4 @@ export const deleteTransactionApi = (id) => req(`/api/transactions/${id}`, { met
 export const importTransactionsApi = (transactions) =>
   req('/api/transactions/import', { method: 'POST', body: { transactions } })
 export const clearTransactionsApi = () => req('/api/transactions', { method: 'DELETE' })
+export const clearBySourceApi = (source) => req(`/api/transactions/source/${source}`, { method: 'DELETE' })

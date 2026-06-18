@@ -6,6 +6,7 @@ import {
   updateTransactionApi,
   deleteTransactionApi,
   importTransactionsApi,
+  clearBySourceApi,
 } from '../services/ledgerApi'
 import { normalizeHoldingsFor } from '../analytics/normalize'
 import { buildAllJourneys } from '../analytics/ledger'
@@ -141,8 +142,10 @@ export function PortfolioProvider({ children }) {
   const importTxns = useCallback(
     async (rows) => {
       if (demo) {
+        // Mirror the backend: a real import for a symbol replaces its Paytm baseline.
+        const realSymbols = new Set(rows.filter((r) => r.source !== 'paytm').map((r) => String(r.symbol).toUpperCase()))
         setTransactions((prev) => [
-          ...prev,
+          ...prev.filter((t) => !(t.source === 'paytm' && realSymbols.has(String(t.symbol).toUpperCase()))),
           ...rows.map((tx) => ({ ...tx, id: demoId(), createdAt: new Date().toISOString() })),
         ])
         return { added: rows.length }
@@ -150,6 +153,19 @@ export function PortfolioProvider({ children }) {
       const res = await importTransactionsApi(rows)
       await reloadTransactions()
       return res
+    },
+    [demo, reloadTransactions],
+  )
+
+  // Remove the approximate "Sync from Paytm" baseline entries (source = 'paytm').
+  const clearSyncedBaseline = useCallback(
+    async () => {
+      if (demo) {
+        setTransactions((prev) => prev.filter((t) => t.source !== 'paytm'))
+        return
+      }
+      await clearBySourceApi('paytm')
+      await reloadTransactions()
     },
     [demo, reloadTransactions],
   )
@@ -185,6 +201,7 @@ export function PortfolioProvider({ children }) {
         editTxn,
         removeTxn,
         importTxns,
+        clearSyncedBaseline,
       }}
     >
       {children}

@@ -38,7 +38,8 @@ function rowToTxn(row) {
 }
 
 export default function Ledger() {
-  const { transactions, holdings, addTxn, editTxn, removeTxn, importTxns } = usePortfolio()
+  const { transactions, holdings, addTxn, editTxn, removeTxn, importTxns, clearSyncedBaseline } = usePortfolio()
+  const hasBaseline = transactions.some((t) => t.source === 'paytm')
   const [form, setForm] = useState(BLANK)
   const [editingId, setEditingId] = useState(null)
   const [busy, setBusy] = useState(false)
@@ -163,7 +164,34 @@ export default function Ledger() {
               📥 Import CSV
             </button>
             <input ref={fileRef} type="file" accept=".csv" onChange={onFile} className="hidden" />
+            {hasBaseline && (
+              <button
+                onClick={async () => {
+                  setMsg(null)
+                  setBusy(true)
+                  try {
+                    await clearSyncedBaseline()
+                    setMsg({ type: 'ok', text: 'Cleared Paytm baseline placeholder entries.' })
+                  } catch (err) {
+                    setMsg({ type: 'error', text: err.message })
+                  } finally {
+                    setBusy(false)
+                  }
+                }}
+                className="rounded-lg border border-down/40 px-3 py-1.5 text-sm font-medium text-down hover:bg-down/5"
+              >
+                🧹 Clear Paytm baseline
+              </button>
+            )}
           </div>
+        </div>
+
+        <div className="mb-3 rounded-lg border border-amber-400/30 bg-amber-400/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
+          <b>Accurate history needs your tradebook.</b> Paytm's API only returns your <i>current</i> holding
+          (avg price + quantity), not past trades or dates — so “Sync from Paytm” creates one approximate
+          <i> baseline</i> buy dated today. For real dates and past sells, download your{' '}
+          <b>Trade book CSV</b> from Paytm Money (Reports/Statements) and Import CSV here — it replaces the
+          baseline for those stocks automatically.
         </div>
 
         <form onSubmit={submit} className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-7">
