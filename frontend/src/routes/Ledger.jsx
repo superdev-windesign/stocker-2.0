@@ -24,13 +24,47 @@ function parseDate(raw) {
   return Number.isNaN(d.getTime()) ? s.slice(0, 10) : d.toISOString().slice(0, 10)
 }
 
+const norm = (s) => String(s).toLowerCase().replace(/[^a-z0-9]/g, '')
+
+// Paytm tradebooks have a metadata preamble (UCC/Name/PAN/Period) before the real header
+// row. Detect the header row (has Date + Type + Quantity) and build objects from it.
+function aoaToObjects(aoa) {
+  let hi = aoa.findIndex((r) => {
+    const cells = (r || []).map(norm)
+    return cells.includes('date') &&
+      cells.some((c) => ['type', 'transactiontype', 'tradetype', 'buysell'].includes(c)) &&
+      cells.some((c) => ['quantity', 'qty', 'tradedqty'].includes(c))
+  })
+  if (hi < 0) hi = 0
+  const headers = (aoa[hi] || []).map((h) => String(h))
+  const out = []
+  for (let i = hi + 1; i < aoa.length; i++) {
+    const r = aoa[i]
+    if (!r || r.every((c) => c === '' || c == null)) continue
+    const obj = {}
+    headers.forEach((h, j) => {
+      if (h) obj[h] = r[j]
+    })
+    out.push(obj)
+  }
+  return out
+}
+
+// Sum all brokerage/tax/charge columns into a single charges figure.
+function sumCharges(row) {
+  const keys = ['brokerage', 'ett', 'gst', 'stt', 'sebi', 'stampduty', 'transactioncharges', 'charges', 'exchangecharges', 'sebicharges']
+  let s = 0
+  for (const k of Object.keys(row)) {
+    if (keys.includes(norm(k))) s += Number(row[k]) || 0
+  }
+  return Math.round(s * 100) / 100
+}
+
 // Map a loosely-shaped tradebook row (Paytm/generic, CSV or Excel) to a transaction.
-// Matches a wide range of header names so most broker exports "just work".
 function rowToTxn(row) {
   const get = (...keys) => {
     for (const k of Object.keys(row)) {
-      const norm = k.toLowerCase().replace(/[^a-z0-9]/g, '')
-      if (keys.includes(norm)) return row[k]
+      if (keys.includes(norm(k))) return row[k]
     }
     return undefined
   }
@@ -39,14 +73,16 @@ function rowToTxn(row) {
   ).toUpperCase()
   const type = rawType.startsWith('S') ? 'SELL' : 'BUY'
   return {
-    symbol: String(get('symbol', 'tradingsymbol', 'scrip', 'scripname', 'nsesymbol', 'instrument', 'stock', 'security') || '')
+    symbol: String(get('symbol', 'script', 'tradingsymbol', 'scrip', 'scripname', 'nsesymbol', 'instrument', 'stock', 'security') || '')
       .trim()
       .toUpperCase(),
     name: get('name', 'companyname', 'displayname') || null,
+    exchange: String(get('exchange', 'exchangesegment', 'exch') || 'NSE').toUpperCase(),
     type,
     date: parseDate(get('date', 'tradedate', 'orderdate', 'transactiondate', 'exchangetime', 'tradetime', 'datetime')),
     quantity: Number(get('quantity', 'qty', 'shares', 'filledqty', 'tradedqty', 'tradedquantity', 'filledquantity') || 0),
     price: Number(get('price', 'avgprice', 'tradeprice', 'tradedprice', 'avgtradedprice', 'rate', 'tradedpriceperunit') || 0),
+    charges: sumCharges(row),
     notes: get('notes', 'remarks') || null,
     source: 'csv',
   }
@@ -122,13 +158,14 @@ export default function Ledger() {
     }
   }
 
-  // Parse a tradebook file (CSV or Excel) into raw row objects keyed by header.
+  // Parse a tradebook file (CSV or Excel) into rows of cells (array-of-arrays), so the
+  // metadata preamble above the real header is preserved for header detection.
   const parseRows = (file) =>
     new Promise((resolve, reject) => {
       const name = file.name.toLowerCase()
       if (name.endsWith('.csv') || file.type === 'text/csv') {
         Papa.parse(file, {
-          header: true,
+          header: false,
           skipEmptyLines: true,
           complete: (res) => resolve(res.data || []),
           error: reject,
@@ -139,7 +176,7 @@ export default function Ledger() {
           try {
             const wb = XLSX.read(new Uint8Array(ev.target.result), { type: 'array', cellDates: true })
             const ws = wb.Sheets[wb.SheetNames[0]]
-            resolve(XLSX.utils.sheet_to_json(ws, { defval: '' }))
+            resolve(XLSX.utils.sheet_to_json(ws, { header: 1, defval: '', raw: false }))
           } catch (err) {
             reject(err)
           }
@@ -154,12 +191,14 @@ export default function Ledger() {
     if (!file) return
     setMsg(null)
     try {
-      const raw = await parseRows(file)
-      const rows = raw.map(rowToTxn).filter((t) => t.symbol && t.quantity > 0 && t.date)
+      const aoa = await parseRows(file)
+      const rows = aoaToObjects(aoa)
+        .map(rowToTxn)
+        .filter((t) => t.symbol && t.quantity > 0 && t.date)
       if (!rows.length) {
-        setMsg({ type: 'error', text: 'No valid rows found. Expected columns like symbol, type, date, quantity, price. Paste me the header row if it won’t parse.' })
+        setMsg({ type: 'error', text: 'No valid rows found. Expected a tradebook with Date / Script / Type / Quantity / Price columns. Paste me the header row if it won’t parse.' })
       } else {
-        setPreview({ rows, total: raw.length, fileName: file.name })
+        setPreview({ rows, total: aoa.length, fileName: file.name })
       }
     } catch (err) {
       setMsg({ type: 'error', text: err.message })
