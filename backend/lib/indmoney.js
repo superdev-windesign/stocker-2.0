@@ -16,12 +16,15 @@ import { db } from './paytm.js'
 const API_BASE = (process.env.INDSTOCKS_API_BASE || '').replace(/\/$/, '')
 const AUTH_HEADER = process.env.INDSTOCKS_AUTH_HEADER || 'Authorization'
 const AUTH_SCHEME = process.env.INDSTOCKS_AUTH_SCHEME ?? 'Bearer ' // set to '' for a bare token
+// A static API key (no secret needed) — used directly as the bearer for every request.
+// If set, no login/token-paste is required.
+const API_KEY = process.env.INDMONEY_API_KEY || process.env.INDSTOCKS_API_KEY || ''
 // Endpoint paths (defaults from the skill's section names — verify against the docs).
 const PATH_HOLDINGS = process.env.INDSTOCKS_PATH_HOLDINGS || '/holdings'
 const PATH_QUOTE = process.env.INDSTOCKS_PATH_QUOTE || '/MarketQuote'
 const PATH_HISTORICAL = process.env.INDSTOCKS_PATH_HISTORICAL || '/historicalData'
 
-export const isConfigured = () => Boolean(API_BASE)
+export const isConfigured = () => Boolean(API_BASE && (API_KEY || true))
 
 let tableReady = false
 async function ensureTable() {
@@ -71,6 +74,10 @@ export async function exchangeRequestToken(body = {}) {
 }
 
 export async function getToken() {
+  // With a server-side API key, the user is "connected" without pasting anything.
+  if (API_KEY) {
+    return { public_access_token: 'indstocks-connected', generated_at: new Date().toISOString(), expires_at: null }
+  }
   const t = await getStoredToken()
   if (!t?.public_access_token) {
     const e = new Error('No INDstocks token stored. Please log in / paste a token first.')
@@ -84,16 +91,23 @@ export async function getToken() {
   }
 }
 
-// Authenticated GET against the INDstocks REST API using the stored token.
+// The bearer used for API calls: the static API key if configured, else a stored token.
+async function authValue() {
+  if (API_KEY) return API_KEY
+  const t = await getStoredToken()
+  return t?.access_token || null
+}
+
+// Authenticated GET against the INDstocks REST API.
 export async function indGet(path, query = {}) {
   if (!API_BASE) {
     const e = new Error('INDSTOCKS_API_BASE not configured')
     e.status = 501
     throw e
   }
-  const t = await getStoredToken()
-  if (!t?.access_token) {
-    const e = new Error('Not logged in to INDstocks')
+  const token = await authValue()
+  if (!token) {
+    const e = new Error('Not logged in to INDstocks (set INDMONEY_API_KEY or paste a token)')
     e.status = 401
     throw e
   }
@@ -102,7 +116,7 @@ export async function indGet(path, query = {}) {
   const resp = await fetch(url, {
     headers: {
       'Content-Type': 'application/json',
-      [AUTH_HEADER]: `${AUTH_SCHEME}${t.access_token}`,
+      [AUTH_HEADER]: `${AUTH_SCHEME}${token}`,
     },
   })
   const text = await resp.text()
