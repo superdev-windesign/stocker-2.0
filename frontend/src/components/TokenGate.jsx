@@ -121,6 +121,29 @@ function ConnectPanel({ provider, onConnect, onBack, error }) {
     }
   }
 
+  // Key-auth providers (INDstocks): the backend already holds the API key, so connecting
+  // just confirms it and logs in — no password, no OAuth redirect (INDstocks has none).
+  const connectViaBackend = async () => {
+    setLoading(true)
+    setRetrieveError(null)
+    try {
+      const res = await fetch(`${BACKEND_URL}${provider.tokenRetrievePath}`)
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok || !data.public_access_token) {
+        setRetrieveError(
+          data.error ||
+            `Couldn't connect. Ensure INDMONEY_API_KEY + INDSTOCKS_API_BASE are set on the backend (and your server IP is whitelisted).`,
+        )
+        return
+      }
+      onConnect(data.public_access_token)
+    } catch (err) {
+      setRetrieveError(err.message)
+    } finally {
+      setLoading(false)
+    }
+  }
+
   return (
     <form onSubmit={submit} className="w-full max-w-lg rounded-2xl border border-white/10 bg-[#12161c] p-8 shadow-xl">
       <button type="button" onClick={onBack} className="text-sm text-gray-500 hover:text-gray-300">
@@ -137,10 +160,28 @@ function ConnectPanel({ provider, onConnect, onBack, error }) {
 
       {!provider.available ? (
         <div className="mt-6 rounded-lg border border-amber-400/30 bg-amber-400/10 px-4 py-3 text-sm text-amber-300">
-          {provider.name} connection is being set up. Once its API credentials are configured on the
-          backend it will connect here automatically. For now you can paste a token below, or go back
-          and choose Paytm Money.
+          {provider.name} isn't enabled yet. Set <code>VITE_INDMONEY_ENABLED=true</code> on the frontend and
+          configure its API key on the backend. For now you can paste an access token below, or go back and
+          choose Paytm Money.
         </div>
+      ) : provider.auth === 'token' ? (
+        <>
+          <button
+            type="button"
+            onClick={connectViaBackend}
+            disabled={loading}
+            className="mt-6 flex w-full items-center justify-center gap-2 rounded-lg bg-indigo-600 py-2.5 font-semibold text-white transition hover:bg-indigo-500 disabled:opacity-50"
+          >
+            {loading ? '⏳ Connecting…' : `🔗 Connect to ${provider.name}`}
+          </button>
+          <p className="mt-2 text-xs text-gray-500">
+            {provider.name} uses an API key (configured on the backend) — no password. This connects and loads
+            your real-time holdings &amp; quotes.
+          </p>
+          {retrieveError && (
+            <div className="mt-3 rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-xs text-red-400">{retrieveError}</div>
+          )}
+        </>
       ) : (
         <>
           <button
@@ -164,24 +205,15 @@ function ConnectPanel({ provider, onConnect, onBack, error }) {
 
           <Divider>or</Divider>
 
-          {provider.auth === 'redirect' ? (
-            <>
-              <a
-                href={`${BACKEND_URL}${provider.loginPath}`}
-                className="flex w-full items-center justify-center gap-2 rounded-lg bg-indigo-600 py-2.5 font-semibold text-white transition hover:bg-indigo-500"
-              >
-                🔑 Login with {provider.name}
-              </a>
-              <p className="mt-2 text-xs text-gray-500">
-                Opens {provider.name} login; the backend exchanges your request token and stores the session.
-              </p>
-            </>
-          ) : (
-            <p className="text-xs text-gray-500">
-              Log in to {provider.name}, generate an access token, and paste it below — it's stored
-              securely on the backend for data access.
-            </p>
-          )}
+          <a
+            href={`${BACKEND_URL}${provider.loginPath}`}
+            className="flex w-full items-center justify-center gap-2 rounded-lg bg-indigo-600 py-2.5 font-semibold text-white transition hover:bg-indigo-500"
+          >
+            🔑 Login with {provider.name}
+          </a>
+          <p className="mt-2 text-xs text-gray-500">
+            Opens {provider.name} login; the backend exchanges your request token and stores the session.
+          </p>
         </>
       )}
 
