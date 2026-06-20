@@ -13,16 +13,17 @@
 // calls send it via the auth header. An OAuth redirect flow can replace exchange() later.
 import { db } from './paytm.js'
 
-const API_BASE = (process.env.INDSTOCKS_API_BASE || '').replace(/\/$/, '')
+// Defaults from INDstocks docs: base https://api.indstocks.com, portfolio under /portfolio,
+// quotes under /market/quotes. Exact sub-paths are overridable via env if they differ.
+const API_BASE = (process.env.INDSTOCKS_API_BASE || 'https://api.indstocks.com').replace(/\/$/, '')
 const AUTH_HEADER = process.env.INDSTOCKS_AUTH_HEADER || 'Authorization'
 const AUTH_SCHEME = process.env.INDSTOCKS_AUTH_SCHEME ?? 'Bearer ' // set to '' for a bare token
 // A static API key (no secret needed) — used directly as the bearer for every request.
 // If set, no login/token-paste is required.
 const API_KEY = process.env.INDMONEY_API_KEY || process.env.INDSTOCKS_API_KEY || ''
-// Endpoint paths (defaults from the skill's section names — verify against the docs).
-const PATH_HOLDINGS = process.env.INDSTOCKS_PATH_HOLDINGS || '/holdings'
-const PATH_QUOTE = process.env.INDSTOCKS_PATH_QUOTE || '/MarketQuote'
-const PATH_HISTORICAL = process.env.INDSTOCKS_PATH_HISTORICAL || '/historicalData'
+const PATH_HOLDINGS = process.env.INDSTOCKS_PATH_HOLDINGS || '/portfolio/holdings'
+const PATH_QUOTE = process.env.INDSTOCKS_PATH_QUOTE || '/market/quotes'
+const PATH_HISTORICAL = process.env.INDSTOCKS_PATH_HISTORICAL || '/market/historical'
 
 export const isConfigured = () => Boolean(API_BASE && (API_KEY || true))
 
