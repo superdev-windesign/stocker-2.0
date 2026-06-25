@@ -36,6 +36,7 @@ import { listNotifications, markRead, markAllRead, notify } from './lib/notifica
 import { startScheduler } from './lib/scheduler.js'
 import { generateInsight } from './lib/insights.js'
 import { runAgent } from './lib/agent.js'
+import * as av from './lib/marketdata/alphavantage.js'
 
 const PORT = Number(process.env.PORT || 5174)
 const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:5173'
@@ -260,6 +261,13 @@ app.post('/api/insights', ledgerHandler((req) =>
 app.post('/api/agent', ledgerHandler((req) =>
   runAgent(req.body?.message || '', req.body?.context || {}, req.body?.history || []),
 ))
+
+// ── Market data (AlphaVantage) — independent whole-market feed ────────────────
+app.get('/api/market/quote', ledgerHandler((req) => av.quote(String(req.query.symbol || '').toUpperCase())))
+app.get('/api/market/history', ledgerHandler((req) => av.history(String(req.query.symbol || '').toUpperCase(), req.query.full === '1')))
+app.get('/api/market/search', ledgerHandler((req) => av.search(String(req.query.q || ''))))
+app.get('/api/market/movers', ledgerHandler(() => av.movers()))
+app.get('/api/market/overview', ledgerHandler((req) => av.overview(String(req.query.symbol || '').toUpperCase())))
 
 app.listen(PORT, () => {
   console.log(`\n[stocker] token helper running on http://localhost:${PORT}`)

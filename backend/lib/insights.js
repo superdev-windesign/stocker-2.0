@@ -7,11 +7,7 @@
 // heuristic path is the in-sandbox default and is fully testable locally.
 import { createHash } from 'node:crypto'
 import { db } from './paytm.js'
-
-const OPENROUTER_KEY = process.env.OPENROUTER_API_KEY
-const MODEL = process.env.OPENROUTER_MODEL || 'liquid/lfm-2.5-1.2b-thinking:free'
-const SITE_URL = process.env.OPENROUTER_SITE_URL || 'https://stocker-2-0-frontend.vercel.app'
-const SITE_NAME = process.env.OPENROUTER_SITE_NAME || 'Stocker'
+import { llmChat, llmConfigured, llmModel, answerOf } from './llm.js'
 
 let ready = false
 async function ensureTable() {
@@ -83,7 +79,7 @@ export function heuristicInsight(p = {}, scope = 'DAILY') {
   return lines.join('\n')
 }
 
-async function callOpenRouter(payload, scope) {
+async function callLLM(payload, scope) {
   const system =
     'You are a concise portfolio analyst for an Indian retail investor. Amounts are in INR. ' +
     'Write a short ' +
@@ -92,30 +88,15 @@ async function callOpenRouter(payload, scope) {
     'concentration/risk, realized vs unrealized P&L, and any re-entry opportunities. ' +
     'Be specific with numbers from the data. Do NOT give prescriptive financial advice or ' +
     'buy/sell recommendations — frame re-entries as "worth reviewing". Plain text/markdown only.'
-  const resp = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${OPENROUTER_KEY}`,
-      'HTTP-Referer': SITE_URL,
-      'X-Title': SITE_NAME,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      model: MODEL,
-      messages: [
-        { role: 'system', content: system },
-        { role: 'user', content: `Portfolio metrics (JSON):\n${JSON.stringify(payload)}` },
-      ],
-      temperature: 0.4,
-      max_tokens: 1100,
-    }),
-  })
-  if (!resp.ok) throw new Error(`OpenRouter ${resp.status}: ${await resp.text()}`)
-  const data = await resp.json()
-  const msg = data?.choices?.[0]?.message || {}
-  // Thinking models may put the answer in `reasoning` when `content` is empty.
-  const text = (msg.content && msg.content.trim()) || (msg.reasoning && msg.reasoning.trim())
-  if (!text) throw new Error('OpenRouter returned no content')
+  const msg = await llmChat(
+    [
+      { role: 'system', content: system },
+      { role: 'user', content: `Portfolio metrics (JSON):\n${JSON.stringify(payload)}` },
+    ],
+    { temperature: 0.4, maxTokens: 1100 },
+  )
+  const text = answerOf(msg)
+  if (!text) throw new Error('LLM returned no content')
   return text
 }
 
@@ -143,10 +124,10 @@ export async function generateInsight(scope = 'DAILY', payload = {}, { refresh =
 
   let text
   let model
-  if (OPENROUTER_KEY) {
+  if (llmConfigured()) {
     try {
-      text = await callOpenRouter(payload, sc)
-      model = MODEL
+      text = await callLLM(payload, sc)
+      model = llmModel()
     } catch (err) {
       console.error('[stocker] insight LLM failed, using heuristic:', err.message)
     }

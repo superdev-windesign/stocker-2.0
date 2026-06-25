@@ -164,6 +164,19 @@ function ConnectPanel({ provider, onConnect, onBack, error }) {
           configure its API key on the backend. For now you can paste an access token below, or go back and
           choose Paytm Money.
         </div>
+      ) : provider.auth === 'explore' ? (
+        <>
+          <button
+            type="button"
+            onClick={() => onConnect('markets')}
+            className="mt-6 flex w-full items-center justify-center gap-2 rounded-lg bg-indigo-600 py-2.5 font-semibold text-white transition hover:bg-indigo-500"
+          >
+            📈 Explore Markets
+          </button>
+          <p className="mt-2 text-xs text-gray-500">
+            No broker login — browse quotes, history, fundamentals and market movers. (Connect Paytm/INDmoney later for your own portfolio.)
+          </p>
+        </>
       ) : provider.auth === 'token' ? (
         <>
           <button
@@ -217,21 +230,25 @@ function ConnectPanel({ provider, onConnect, onBack, error }) {
         </>
       )}
 
-      <Divider>or paste manually</Divider>
-      <textarea
-        value={token}
-        onChange={(e) => setToken(e.target.value)}
-        rows={3}
-        placeholder={`Paste your ${provider.name} access token…`}
-        className="w-full resize-none rounded-lg border border-white/10 bg-[#0b0e11] p-3 font-mono text-sm text-gray-100 outline-none focus:border-indigo-500"
-      />
-      <button
-        type="submit"
-        disabled={!token.trim() || submitting}
-        className="mt-4 w-full rounded-lg border border-white/15 py-2.5 font-semibold text-gray-200 transition hover:border-white/35 disabled:cursor-not-allowed disabled:opacity-40"
-      >
-        {submitting ? 'Connecting…' : 'Connect with pasted token'}
-      </button>
+      {provider.auth !== 'explore' && (
+        <>
+          <Divider>or paste manually</Divider>
+          <textarea
+            value={token}
+            onChange={(e) => setToken(e.target.value)}
+            rows={3}
+            placeholder={`Paste your ${provider.name} access token…`}
+            className="w-full resize-none rounded-lg border border-white/10 bg-[#0b0e11] p-3 font-mono text-sm text-gray-100 outline-none focus:border-indigo-500"
+          />
+          <button
+            type="submit"
+            disabled={!token.trim() || submitting}
+            className="mt-4 w-full rounded-lg border border-white/15 py-2.5 font-semibold text-gray-200 transition hover:border-white/35 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            {submitting ? 'Connecting…' : 'Connect with pasted token'}
+          </button>
+        </>
+      )}
     </form>
   )
 }

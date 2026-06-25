@@ -1,4 +1,4 @@
-import { Routes, Route, NavLink, useNavigate, useLocation } from 'react-router-dom'
+import { Routes, Route, Navigate, NavLink, useNavigate, useLocation } from 'react-router-dom'
 import { useAuth } from './context/AuthContext'
 import { PortfolioProvider } from './context/PortfolioContext'
 import { AlertsProvider } from './context/AlertsContext'
@@ -14,6 +14,7 @@ import Alerts from './routes/Alerts'
 import Tax from './routes/Tax'
 import Rebalance from './routes/Rebalance'
 import Copilot from './routes/Copilot'
+import Markets from './routes/Markets'
 
 function NavTab({ to, children }) {
   return (
@@ -55,6 +56,7 @@ function Layout({ children }) {
           <nav className="flex items-center gap-1">
             <NavTab to="/">Portfolio</NavTab>
             <NavTab to="/copilot">Copilot</NavTab>
+            <NavTab to="/markets">Markets</NavTab>
             <NavTab to="/ledger">Ledger</NavTab>
             <NavTab to="/tax">Tax</NavTab>
             <NavTab to="/rebalance">Rebalance</NavTab>
@@ -92,7 +94,7 @@ function Layout({ children }) {
 }
 
 export default function App() {
-  const { token, setToken, authError, checking, demo, setDemo } = useAuth()
+  const { token, setToken, authError, checking, demo, setDemo, provider } = useAuth()
 
   if (checking) {
     return (
@@ -111,7 +113,11 @@ export default function App() {
       <AlertsProvider>
         <Layout>
           <Routes>
-            <Route path="/" element={<PortfolioDashboard />} />
+            <Route
+              path="/"
+              element={provider === 'alphavantage' ? <Navigate to="/markets" replace /> : <PortfolioDashboard />}
+            />
+            <Route path="/markets" element={<Markets />} />
             <Route path="/copilot" element={<Copilot />} />
             <Route path="/ledger" element={<Ledger />} />
             <Route path="/tax" element={<Tax />} />

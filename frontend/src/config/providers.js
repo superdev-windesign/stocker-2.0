@@ -27,6 +27,14 @@ export const PROVIDERS = {
     exchangePath: '/api/indmoney/exchange',
     tokenRetrievePath: '/api/indmoney/token/retrieve',
   },
+  alphavantage: {
+    id: 'alphavantage',
+    name: 'AlphaVantage',
+    markets: 'Explore global markets & research (no broker login)',
+    flag: '📈',
+    available: true,
+    auth: 'explore', // no account — enters market-data explore mode
+  },
 }
 
 export const PROVIDER_LIST = Object.values(PROVIDERS)

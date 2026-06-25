@@ -4,11 +4,8 @@
 // DEPLOY-ONLY for the live model (sandbox egress blocks openrouter.ai); without a key it
 // degrades to a deterministic rule-based responder so the Copilot still does something.
 import { listAlerts, addAlert, ALERT_TYPES } from './alerts.js'
+import { llmChat, llmConfigured, llmModel, answerOf } from './llm.js'
 
-const OPENROUTER_KEY = process.env.OPENROUTER_API_KEY
-const MODEL = process.env.OPENROUTER_MODEL || 'liquid/lfm-2.5-1.2b-thinking:free'
-const SITE_URL = process.env.OPENROUTER_SITE_URL || 'https://stocker-2-0-frontend.vercel.app'
-const SITE_NAME = process.env.OPENROUTER_SITE_NAME || 'Stocker'
 const MAX_STEPS = 5
 
 // ── Tools the agent can call (OpenAI-compatible function schema) ──────────────
@@ -61,33 +58,8 @@ async function runTool(name, args, actions) {
   return { error: `unknown tool ${name}` }
 }
 
-async function chat(messages, { useTools = true } = {}) {
-  const body = { model: MODEL, messages, temperature: 0.3, max_tokens: 1000 }
-  if (useTools) {
-    body.tools = TOOLS
-    body.tool_choice = 'auto'
-  }
-  const resp = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${OPENROUTER_KEY}`,
-      'HTTP-Referer': SITE_URL,
-      'X-Title': SITE_NAME,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(body),
-  })
-  if (!resp.ok) {
-    const err = new Error(`OpenRouter ${resp.status}: ${await resp.text()}`)
-    err.status = resp.status
-    throw err
-  }
-  const data = await resp.json()
-  return data?.choices?.[0]?.message || {}
-}
-
-// Thinking models may return the answer in `reasoning` if `content` is empty.
-const answerOf = (msg) => (msg?.content && msg.content.trim()) || (msg?.reasoning && msg.reasoning.trim()) || ''
+const chat = (messages, { useTools = true } = {}) =>
+  llmChat(messages, { tools: useTools ? TOOLS : undefined, temperature: 0.3, maxTokens: 1000 })
 
 const SYSTEM =
   'You are Stocker Copilot, an agentic portfolio assistant for an Indian retail investor (amounts in ' +
@@ -119,7 +91,7 @@ function heuristicReply(message, context) {
  */
 export async function runAgent(message, context = {}, history = []) {
   const actions = []
-  if (!OPENROUTER_KEY) {
+  if (!llmConfigured()) {
     return { reply: heuristicReply(message, context), actions, model: 'heuristic' }
   }
 
@@ -138,7 +110,7 @@ export async function runAgent(message, context = {}, history = []) {
       const calls = msg.tool_calls || []
       if (!calls.length) {
         const text = answerOf(msg)
-        if (text) return { reply: text, actions, model: MODEL }
+        if (text) return { reply: text, actions, model: llmModel() }
         break // empty answer — fall through to no-tools retry
       }
       for (const call of calls) {
@@ -161,7 +133,7 @@ export async function runAgent(message, context = {}, history = []) {
   try {
     const msg = await chat(baseMessages, { useTools: false })
     const text = answerOf(msg)
-    if (text) return { reply: text, actions, model: MODEL }
+    if (text) return { reply: text, actions, model: llmModel() }
   } catch (err) {
     console.error('[stocker] agent (no-tools) failed:', err.message)
   }
