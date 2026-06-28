@@ -9,3 +9,5 @@ dist
 server/.tokens.json
 .vercel
 .env*.local
+*.db
+*.patch

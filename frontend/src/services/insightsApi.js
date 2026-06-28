@@ -6,6 +6,7 @@ const BACKEND_URL =
 export async function fetchInsight(scope, payload, { refresh = false } = {}) {
   const res = await fetch(`${BACKEND_URL}/api/insights`, {
     method: 'POST',
+    credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ scope, payload, refresh }),
   })

@@ -1,8 +1,4 @@
-// Alert engine — persists user price/portfolio alerts and evaluates them against a
-// price map. Thresholds are precomputed by the frontend (e.g. a re-entry alert stores
-// the last-sell price as its threshold), so this engine stays a pure set of comparisons.
-// The scheduler (lib/scheduler.js) feeds it live prices on Render; locally it's driven by
-// POST /api/alerts/evaluate-now with an injected price map.
+// Alert engine — all operations scoped by userId.
 import { randomUUID } from 'node:crypto'
 import { db } from './paytm.js'
 
@@ -10,7 +6,7 @@ export const ALERT_TYPES = [
   'PRICE_ABOVE',
   'PRICE_BELOW',
   'PCT_CHANGE',
-  'REENTRY_ZONE', // fires when price falls to/below your last exit (threshold = exit price)
+  'REENTRY_ZONE',
   'NEAR_52W_HIGH',
   'NEAR_52W_LOW',
   'PORTFOLIO_PNL_PCT',
@@ -22,22 +18,26 @@ async function ensureTable() {
   await db.execute(`
     CREATE TABLE IF NOT EXISTS alerts (
       id           TEXT PRIMARY KEY,
+      user_id      TEXT,
       symbol       TEXT,
       security_id  TEXT,
       exchange     TEXT DEFAULT 'NSE',
       type         TEXT NOT NULL,
       threshold    REAL,
-      direction    TEXT,                 -- ABOVE | BELOW (for PCT/PNL types)
+      direction    TEXT,
       note         TEXT,
-      status       TEXT NOT NULL DEFAULT 'ACTIVE',  -- ACTIVE | TRIGGERED | PAUSED
-      repeat       INTEGER NOT NULL DEFAULT 0,       -- 0 one-shot, 1 re-arm
-      channels     TEXT NOT NULL DEFAULT 'inapp',    -- csv: inapp,email
+      status       TEXT NOT NULL DEFAULT 'ACTIVE',
+      repeat       INTEGER NOT NULL DEFAULT 0,
+      channels     TEXT NOT NULL DEFAULT 'inapp',
       last_value   REAL,
       last_checked_at TEXT,
       triggered_at TEXT,
       created_at   TEXT NOT NULL
     )
   `)
+  const info = await db.execute(`PRAGMA table_info(alerts)`)
+  const cols = new Set(info.rows.map((r) => r.name))
+  if (!cols.has('user_id')) await db.execute(`ALTER TABLE alerts ADD COLUMN user_id TEXT`)
   ready = true
 }
 
@@ -83,28 +83,34 @@ function clean(a) {
   }
 }
 
-export async function listAlerts() {
+export async function listAlerts(userId) {
   await ensureTable()
-  const res = await db.execute(`SELECT * FROM alerts ORDER BY created_at DESC`)
+  const res = await db.execute({
+    sql: `SELECT * FROM alerts WHERE user_id = ? ORDER BY created_at DESC`,
+    args: [userId],
+  })
   return res.rows.map(toApi)
 }
 
-export async function addAlert(a) {
+export async function addAlert(userId, a) {
   await ensureTable()
   const c = clean(a)
   const id = randomUUID()
   const createdAt = new Date().toISOString()
   await db.execute({
-    sql: `INSERT INTO alerts (id, symbol, security_id, exchange, type, threshold, direction, note, status, repeat, channels, created_at)
-          VALUES (?,?,?,?,?,?,?,?, 'ACTIVE', ?, ?, ?)`,
-    args: [id, c.symbol, c.securityId, c.exchange, c.type, c.threshold, c.direction, c.note, c.repeat, c.channels, createdAt],
+    sql: `INSERT INTO alerts (id, user_id, symbol, security_id, exchange, type, threshold, direction, note, status, repeat, channels, created_at)
+          VALUES (?,?,?,?,?,?,?,?,?, 'ACTIVE', ?, ?, ?)`,
+    args: [id, userId, c.symbol, c.securityId, c.exchange, c.type, c.threshold, c.direction, c.note, c.repeat, c.channels, createdAt],
   })
   return { id, status: 'ACTIVE', createdAt, ...c }
 }
 
-export async function updateAlertStatus(id, status) {
+export async function updateAlertStatus(userId, id, status) {
   await ensureTable()
-  const res = await db.execute({ sql: `UPDATE alerts SET status=? WHERE id=?`, args: [status, id] })
+  const res = await db.execute({
+    sql: `UPDATE alerts SET status=? WHERE id=? AND user_id=?`,
+    args: [status, id, userId],
+  })
   if (res.rowsAffected === 0) {
     const e = new Error('Alert not found')
     e.status = 404
@@ -113,12 +119,11 @@ export async function updateAlertStatus(id, status) {
   return { id, status }
 }
 
-export async function deleteAlert(id) {
+export async function deleteAlert(userId, id) {
   await ensureTable()
-  await db.execute({ sql: `DELETE FROM alerts WHERE id=?`, args: [id] })
+  await db.execute({ sql: `DELETE FROM alerts WHERE id=? AND user_id=?`, args: [id, userId] })
 }
 
-// Mark an alert fired: record value + timestamp; one-shot alerts auto-pause, repeat re-arms.
 async function markFired(alert, value) {
   const now = new Date().toISOString()
   const status = alert.repeat ? 'ACTIVE' : 'TRIGGERED'
@@ -135,8 +140,6 @@ async function markChecked(id, value) {
   })
 }
 
-// Decide whether a single alert fires given a quote + portfolio context.
-// quote: { last, changePct, high52, low52 }
 function check(alert, quote, ctx) {
   const t = alert.threshold
   if (alert.type === 'PORTFOLIO_PNL_PCT') {
@@ -185,17 +188,9 @@ const titleFor = (a) =>
     PORTFOLIO_PNL_PCT: `Portfolio P&L crossed ${a.threshold}%`,
   })[a.type] || `Alert: ${a.symbol}`
 
-/**
- * Evaluate all ACTIVE alerts against a price map. Returns the fired alerts with a
- * notification payload; persists fired/checked state. Pure of any channel/transport —
- * the caller decides how to deliver (lib/notifications.js).
- *
- * @param {object} priceMap  { SYMBOL: { last, changePct, high52, low52 } }
- * @param {object} ctx       { portfolioPnlPct }
- */
-export async function evaluateAlerts(priceMap = {}, ctx = {}) {
+export async function evaluateAlerts(userId, priceMap = {}, ctx = {}) {
   await ensureTable()
-  const alerts = (await listAlerts()).filter((a) => a.status === 'ACTIVE')
+  const alerts = (await listAlerts(userId)).filter((a) => a.status === 'ACTIVE')
   const fired = []
   for (const a of alerts) {
     const quote = a.symbol ? priceMap[a.symbol] || priceMap[String(a.symbol).toUpperCase()] : null

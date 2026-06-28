@@ -5,6 +5,7 @@ const BACKEND_URL =
 export async function askAgent(message, context, history = []) {
   const res = await fetch(`${BACKEND_URL}/api/agent`, {
     method: 'POST',
+    credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ message, context, history }),
   })

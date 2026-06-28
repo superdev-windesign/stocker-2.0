@@ -1,6 +1,6 @@
-// Shared Paytm + Turso logic for the Stocker Express backend (backend/index.js).
-// Turso is the single source of truth for the session, so the server stays stateless —
-// every call reads the token straight from the DB rather than an in-memory cache.
+// Shared Paytm + Turso logic for the Stocker Express backend.
+// broker_accounts table replaces the legacy single-row sessions table so each user
+// can connect their own Paytm account.
 
 import { createClient } from '@libsql/client'
 
@@ -18,12 +18,14 @@ const db = createClient({
   authToken: process.env.TURSO_AUTH_TOKEN,
 })
 
-// Exported so the transaction ledger (lib/ledger.js) reuses the same connection.
 export { db }
 
-let tableReady = false
-async function ensureTable() {
-  if (tableReady) return
+// ── broker_accounts table (replaces the legacy single-row sessions table) ────
+let baReady = false
+async function ensureBrokerAccountsTable() {
+  if (baReady) return
+  // Keep the legacy sessions table so existing single-user data isn't broken while
+  // we migrate. broker_accounts is the multi-user successor.
   await db.execute(`
     CREATE TABLE IF NOT EXISTS sessions (
       id       INTEGER PRIMARY KEY CHECK (id = 1),
@@ -31,7 +33,18 @@ async function ensureTable() {
       saved_at TEXT NOT NULL
     )
   `)
-  tableReady = true
+  await db.execute(`
+    CREATE TABLE IF NOT EXISTS broker_accounts (
+      id         TEXT PRIMARY KEY,
+      user_id    TEXT NOT NULL,
+      provider   TEXT NOT NULL,
+      token_data TEXT NOT NULL,
+      status     TEXT NOT NULL DEFAULT 'active',
+      saved_at   TEXT NOT NULL,
+      UNIQUE(user_id, provider)
+    )
+  `)
+  baReady = true
 }
 
 // Decode the `exp` (UNIX seconds) from a JWT without verifying the signature.
@@ -44,51 +57,61 @@ export function tokenExp(jwt) {
   }
 }
 
-// A token set is usable only while its access_token JWT hasn't expired.
 export function isValid(t) {
   if (!t?.access_token) return false
   const exp = tokenExp(t.access_token)
   return exp ? exp * 1000 > Date.now() : true
 }
 
-export async function getTokens() {
-  await ensureTable()
-  const result = await db.execute(`SELECT data FROM sessions WHERE id = 1`)
-  if (!result.rows.length) return null
+// ── Per-user broker token ops ─────────────────────────────────────────────────
+
+export async function getTokens(userId) {
+  await ensureBrokerAccountsTable()
+  const res = await db.execute({
+    sql: `SELECT token_data FROM broker_accounts WHERE user_id = ? AND provider = 'paytm'`,
+    args: [userId],
+  })
+  if (!res.rows.length) return null
   try {
-    return JSON.parse(result.rows[0].data)
+    return JSON.parse(res.rows[0].token_data)
   } catch {
     return null
   }
 }
 
-// Read the session and drop it if expired, so the UI re-prompts a login.
-export async function getValidTokens() {
-  const t = await getTokens()
+export async function getValidTokens(userId) {
+  const t = await getTokens(userId)
   if (!t) return null
   if (!isValid(t)) {
-    await clearTokens()
+    await clearTokens(userId)
     return null
   }
   return t
 }
 
-export async function saveTokens(tokens) {
-  await ensureTable()
+export async function saveTokens(userId, tokens) {
+  await ensureBrokerAccountsTable()
+  const { randomUUID } = await import('node:crypto')
   await db.execute({
-    sql: `INSERT INTO sessions (id, data, saved_at) VALUES (1, ?, ?)
-          ON CONFLICT(id) DO UPDATE SET data = excluded.data, saved_at = excluded.saved_at`,
-    args: [JSON.stringify(tokens), new Date().toISOString()],
+    sql: `INSERT INTO broker_accounts (id, user_id, provider, token_data, status, saved_at)
+          VALUES (?, ?, 'paytm', ?, 'active', ?)
+          ON CONFLICT(user_id, provider) DO UPDATE SET
+            token_data = excluded.token_data,
+            status     = 'active',
+            saved_at   = excluded.saved_at`,
+    args: [randomUUID(), userId, JSON.stringify(tokens), new Date().toISOString()],
   })
 }
 
-export async function clearTokens() {
-  await ensureTable()
-  await db.execute(`DELETE FROM sessions WHERE id = 1`)
+export async function clearTokens(userId) {
+  await ensureBrokerAccountsTable()
+  await db.execute({
+    sql: `DELETE FROM broker_accounts WHERE user_id = ? AND provider = 'paytm'`,
+    args: [userId],
+  })
 }
 
-// Exchange a Paytm request_token for the token set and persist it to Turso.
-export async function exchangeRequestToken(requestToken) {
+export async function exchangeRequestToken(requestToken, userId) {
   if (!API_KEY || !API_SECRET) {
     const e = new Error('PAYTM_API_KEY / PAYTM_API_SECRET not configured')
     e.status = 500
@@ -110,16 +133,14 @@ export async function exchangeRequestToken(requestToken) {
     throw e
   }
   const tokens = { ...JSON.parse(text), generated_at: new Date().toISOString() }
-  await saveTokens(tokens)
+  await saveTokens(userId, tokens)
   return tokens
 }
 
-// Authenticated GET against Paytm's REST API using the stored access_token.
-// Mirrors the official SDK: x-jwt-token header + openapi-client-src: 'sdk'.
-export async function paytmGet(path, query = {}) {
-  const tokens = await getValidTokens()
+export async function paytmGet(path, query = {}, userId) {
+  const tokens = await getValidTokens(userId)
   if (!tokens?.access_token) {
-    const e = new Error('Not logged in')
+    const e = new Error('Paytm not connected. Please connect your Paytm account.')
     e.status = 401
     throw e
   }
@@ -145,4 +166,11 @@ export async function paytmGet(path, query = {}) {
     throw e
   }
   return body
+}
+
+// Convenience: get the public_access_token for a user (used by the frontend
+// WebSocket connection and the token-status endpoint).
+export async function getPublicToken(userId) {
+  const t = await getValidTokens(userId)
+  return t?.public_access_token || null
 }

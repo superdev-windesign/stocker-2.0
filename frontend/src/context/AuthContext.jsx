@@ -1,57 +1,51 @@
 import { createContext, useContext, useEffect, useState } from 'react'
 
-// The frontend talks to the standalone Express backend. Dev defaults to the local
-// backend on :5174; set VITE_BACKEND_URL to point at a deployed backend in production.
 const BACKEND_URL =
   import.meta.env.VITE_BACKEND_URL ?? (import.meta.env.DEV ? 'http://localhost:5174' : '')
+
+// All fetch calls go through this helper so credentials (httpOnly cookie) are always sent.
+async function apiFetch(path, opts = {}) {
+  const res = await fetch(`${BACKEND_URL}${path}`, {
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json', ...opts.headers },
+    ...opts,
+  })
+  return res
+}
 
 const AuthContext = createContext(null)
 
 /**
- * Tracks the Paytm session. "Logged in" == the token-helper backend has a cached
- * public_access_token (returned by GET /api/token). Portfolio /api/* calls use the
- * backend's server-side access_token, so the frontend only needs this token for the
- * live websocket and as a login signal.
+ * Two-layer auth:
+ *  1. Stocker account (email/password → JWT httpOnly cookie) — controls access to the app.
+ *  2. Broker connection (Paytm / INDmoney OAuth) — controls live data. Stored per-user
+ *     in broker_accounts after the Stocker session is established.
  */
 export function AuthProvider({ children }) {
+  // Stocker user session
+  const [user, setUser] = useState(null)         // { id, email, name }
+  const [checking, setChecking] = useState(true)
+
+  // Broker connection (Paytm public_access_token for WebSocket use)
   const [token, setToken] = useState(null)
   const [authError, setAuthError] = useState(null)
-  const [checking, setChecking] = useState(true)
-  // Selected broker/provider (paytm | indmoney). Persisted so a refresh keeps the
-  // chosen platform. Drives which auth flow + markets the app uses.
-  const [provider, setProviderState] = useState(() => {
-    try {
-      return localStorage.getItem('stocker_provider') || null
-    } catch {
-      return null
-    }
-  })
 
+  // Selected broker/provider (paytm | indmoney). Persisted in localStorage.
+  const [provider, setProviderState] = useState(() => {
+    try { return localStorage.getItem('stocker_provider') || null } catch { return null }
+  })
   const setProvider = (id) => {
     setProviderState(id)
-    try {
-      id ? localStorage.setItem('stocker_provider', id) : localStorage.removeItem('stocker_provider')
-    } catch {
-      /* ignore */
-    }
+    try { id ? localStorage.setItem('stocker_provider', id) : localStorage.removeItem('stocker_provider') } catch { /* ignore */ }
   }
-  // Demo mode: show dummy portfolio data without a real Paytm login. Persisted so
-  // a refresh stays in demo. Independent of `token` — can be toggled either way.
-  const [demo, setDemoState] = useState(() => {
-    try {
-      return localStorage.getItem('stocker_demo') === '1'
-    } catch {
-      return false
-    }
-  })
 
+  // Demo mode: show dummy portfolio without a real account.
+  const [demo, setDemoState] = useState(() => {
+    try { return localStorage.getItem('stocker_demo') === '1' } catch { return false }
+  })
   const setDemo = (v) => {
     setDemoState(v)
-    try {
-      v ? localStorage.setItem('stocker_demo', '1') : localStorage.removeItem('stocker_demo')
-    } catch {
-      /* ignore */
-    }
+    try { v ? localStorage.setItem('stocker_demo', '1') : localStorage.removeItem('stocker_demo') } catch { /* ignore */ }
   }
 
   useEffect(() => {
@@ -63,55 +57,105 @@ export function AuthProvider({ children }) {
       cleanUrl()
     }
 
-    // Paytm's Return URL redirects to the app root with ?requestToken=... — hand it to
-    // the backend, which exchanges it for the token set and stores it in Turso.
+    // Paytm Return-URL callback: exchange request_token once Stocker session exists.
     const requestToken = params.get('requestToken') || params.get('request_token')
 
     const init = async () => {
-      if (requestToken) {
-        try {
-          const r = await fetch(`${BACKEND_URL}/api/exchange`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ request_token: requestToken }),
-          })
-          const d = await r.json().catch(() => ({}))
-          if (r.ok && d.public_access_token) setToken(d.public_access_token)
-          else setAuthError(d.error || 'Token exchange failed')
-        } catch (e) {
-          setAuthError(e.message)
-        } finally {
-          cleanUrl()
-        }
-        return
-      }
+      // 1. Check Stocker session.
+      const meRes = await apiFetch('/auth/me')
+      if (meRes.ok) {
+        const { user: u } = await meRes.json()
+        setUser(u)
 
-      // No request token: probe the backend so a page refresh stays logged in. Use the
-      // selected provider's token endpoint (Paytm by default).
-      try {
-        const tokenPath = provider === 'indmoney' ? '/api/indmoney/token' : '/api/token'
-        const r = await fetch(`${BACKEND_URL}${tokenPath}`)
-        const d = r.ok ? await r.json() : null
-        if (d?.public_access_token) setToken(d.public_access_token)
-      } catch {
-        /* not logged in yet */
+        // 2. If a Paytm return token is in the URL, exchange it now.
+        if (requestToken) {
+          try {
+            const r = await apiFetch('/api/exchange', {
+              method: 'POST',
+              body: JSON.stringify({ request_token: requestToken }),
+            })
+            const d = await r.json().catch(() => ({}))
+            if (r.ok && d.public_access_token) setToken(d.public_access_token)
+            else setAuthError(d.error || 'Broker token exchange failed')
+          } catch (e) {
+            setAuthError(e.message)
+          } finally {
+            cleanUrl()
+          }
+          return
+        }
+
+        // 3. Probe for existing broker token (keeps session alive across refresh).
+        try {
+          const tokenPath = provider === 'indmoney' ? '/api/indmoney/token' : '/api/token'
+          const r = await apiFetch(tokenPath)
+          const d = r.ok ? await r.json() : null
+          if (d?.public_access_token) setToken(d.public_access_token)
+        } catch { /* no broker connected yet */ }
+
+        if (params.get('connected')) cleanUrl()
+      } else {
+        // Not logged in — handled by App.jsx redirect to /login.
+        if (requestToken) cleanUrl()
       }
-      if (params.get('connected')) cleanUrl()
     }
 
     init().finally(() => setChecking(false))
   }, [])
 
-  const logout = () => {
+  // ── Stocker account auth ────────────────────────────────────────────────────
+  async function login(email, password) {
+    const res = await apiFetch('/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({ email, password }),
+    })
+    const data = await res.json()
+    if (!res.ok) throw new Error(data.error || 'Login failed')
+    setUser(data.user)
+    return data.user
+  }
+
+  async function register(email, password, name) {
+    const res = await apiFetch('/auth/register', {
+      method: 'POST',
+      body: JSON.stringify({ email, password, name }),
+    })
+    const data = await res.json()
+    if (!res.ok) throw new Error(data.error || 'Registration failed')
+    setUser(data.user)
+    return data.user
+  }
+
+  async function logout() {
+    // Sign out of Stocker (clears JWT cookie).
+    await apiFetch('/auth/logout', { method: 'POST' })
+    setUser(null)
     setToken(null)
     setDemo(false)
     setProvider(null)
-    fetch(`${BACKEND_URL}/api/logout`, { method: 'POST' }).catch(() => {})
+    setAuthError(null)
+  }
+
+  // Disconnect broker (keeps Stocker session, only removes broker token).
+  async function disconnectBroker() {
+    await apiFetch('/api/logout', { method: 'POST' })
+    setToken(null)
   }
 
   return (
     <AuthContext.Provider
-      value={{ token, setToken, authError, setAuthError, checking, logout, demo, setDemo, provider, setProvider }}
+      value={{
+        // Stocker session
+        user, setUser, checking,
+        login, register, logout,
+        // Broker connection
+        token, setToken,
+        disconnectBroker,
+        authError, setAuthError,
+        // Provider selection + demo mode
+        provider, setProvider,
+        demo, setDemo,
+      }}
     >
       {children}
     </AuthContext.Provider>

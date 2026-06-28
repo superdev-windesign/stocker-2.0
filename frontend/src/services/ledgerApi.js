@@ -5,6 +5,7 @@ const BACKEND_URL =
 async function req(path, { method = 'GET', body } = {}) {
   const res = await fetch(`${BACKEND_URL}${path}`, {
     method,
+    credentials: 'include',
     headers: body ? { 'Content-Type': 'application/json' } : undefined,
     body: body ? JSON.stringify(body) : undefined,
   })

@@ -1,6 +1,4 @@
-// Transaction ledger — the lifetime buy/sell history that powers Stock Journey,
-// trade analytics, re-entry tracking, etc. Persisted in the same Turso DB as the
-// Paytm session. Single-user (like the rest of the app), so no user scoping.
+// Transaction ledger — lifetime buy/sell history. All queries are scoped by userId.
 import { randomUUID } from 'node:crypto'
 import { db } from './paytm.js'
 
@@ -10,33 +8,34 @@ async function ensureTable() {
   await db.execute(`
     CREATE TABLE IF NOT EXISTS transactions (
       id          TEXT PRIMARY KEY,
+      user_id     TEXT,
       security_id TEXT,
       symbol      TEXT NOT NULL,
       name        TEXT,
       exchange    TEXT NOT NULL DEFAULT 'NSE',
-      type        TEXT NOT NULL,             -- BUY | SELL
-      date        TEXT NOT NULL,             -- YYYY-MM-DD (trade date)
+      type        TEXT NOT NULL,
+      date        TEXT NOT NULL,
       quantity    REAL NOT NULL,
-      price       REAL NOT NULL,             -- per share
+      price       REAL NOT NULL,
       charges     REAL NOT NULL DEFAULT 0,
       notes       TEXT,
-      source      TEXT NOT NULL DEFAULT 'manual',  -- manual | csv | paytm
+      source      TEXT NOT NULL DEFAULT 'manual',
       currency    TEXT NOT NULL DEFAULT 'INR',
       country     TEXT NOT NULL DEFAULT 'IN',
-      ext_id      TEXT,                            -- broker trade/order id (for dedup)
+      ext_id      TEXT,
       created_at  TEXT NOT NULL
     )
   `)
-  // Additive migration for DBs created before currency/country/ext_id existed.
+  // Additive migrations for DBs created before these columns existed.
   const info = await db.execute(`PRAGMA table_info(transactions)`)
   const cols = new Set(info.rows.map((r) => r.name))
   if (!cols.has('currency')) await db.execute(`ALTER TABLE transactions ADD COLUMN currency TEXT NOT NULL DEFAULT 'INR'`)
-  if (!cols.has('country')) await db.execute(`ALTER TABLE transactions ADD COLUMN country TEXT NOT NULL DEFAULT 'IN'`)
-  if (!cols.has('ext_id')) await db.execute(`ALTER TABLE transactions ADD COLUMN ext_id TEXT`)
+  if (!cols.has('country'))  await db.execute(`ALTER TABLE transactions ADD COLUMN country  TEXT NOT NULL DEFAULT 'IN'`)
+  if (!cols.has('ext_id'))   await db.execute(`ALTER TABLE transactions ADD COLUMN ext_id   TEXT`)
+  if (!cols.has('user_id'))  await db.execute(`ALTER TABLE transactions ADD COLUMN user_id  TEXT`)
   tableReady = true
 }
 
-// DB row (snake_case) -> API shape (camelCase) the frontend consumes.
 const toApi = (r) => ({
   id: r.id,
   securityId: r.security_id,
@@ -56,7 +55,6 @@ const toApi = (r) => ({
   createdAt: r.created_at,
 })
 
-// Validate + coerce an incoming transaction. Throws a 400-tagged error if invalid.
 function clean(tx) {
   const bad = (msg) => {
     const e = new Error(msg)
@@ -74,7 +72,6 @@ function clean(tx) {
   const price = Number(tx.price)
   if (!(price >= 0)) bad('price must be >= 0')
   const exchange = (tx.exchange ? String(tx.exchange) : 'NSE').toUpperCase()
-  // Country/currency default to India; derive from exchange, allow explicit override.
   const country = (tx.country ? String(tx.country) : exchange === 'NASDAQ' || exchange === 'NYSE' ? 'US' : 'IN').toUpperCase()
   const currency = (tx.currency ? String(tx.currency) : country === 'US' ? 'USD' : 'INR').toUpperCase()
   return {
@@ -95,35 +92,37 @@ function clean(tx) {
   }
 }
 
-export async function listTransactions() {
+export async function listTransactions(userId) {
   await ensureTable()
-  // Chronological by trade date, then insertion order.
-  const res = await db.execute(`SELECT * FROM transactions ORDER BY date ASC, created_at ASC`)
+  const res = await db.execute({
+    sql: `SELECT * FROM transactions WHERE user_id = ? ORDER BY date ASC, created_at ASC`,
+    args: [userId],
+  })
   return res.rows.map(toApi)
 }
 
-export async function addTransaction(tx) {
+export async function addTransaction(userId, tx) {
   await ensureTable()
   const c = clean(tx)
   const id = randomUUID()
   const createdAt = new Date().toISOString()
   await db.execute({
     sql: `INSERT INTO transactions
-            (id, security_id, symbol, name, exchange, type, date, quantity, price, charges, notes, source, currency, country, ext_id, created_at)
-          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-    args: [id, c.securityId, c.symbol, c.name, c.exchange, c.type, c.date, c.quantity, c.price, c.charges, c.notes, c.source, c.currency, c.country, c.extId, createdAt],
+            (id, user_id, security_id, symbol, name, exchange, type, date, quantity, price, charges, notes, source, currency, country, ext_id, created_at)
+          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+    args: [id, userId, c.securityId, c.symbol, c.name, c.exchange, c.type, c.date, c.quantity, c.price, c.charges, c.notes, c.source, c.currency, c.country, c.extId, createdAt],
   })
   return { id, createdAt, ...c }
 }
 
-export async function updateTransaction(id, tx) {
+export async function updateTransaction(userId, id, tx) {
   await ensureTable()
   const c = clean(tx)
   const res = await db.execute({
     sql: `UPDATE transactions SET
             security_id=?, symbol=?, name=?, exchange=?, type=?, date=?, quantity=?, price=?, charges=?, notes=?, source=?, currency=?, country=?
-          WHERE id=?`,
-    args: [c.securityId, c.symbol, c.name, c.exchange, c.type, c.date, c.quantity, c.price, c.charges, c.notes, c.source, c.currency, c.country, id],
+          WHERE id=? AND user_id=?`,
+    args: [c.securityId, c.symbol, c.name, c.exchange, c.type, c.date, c.quantity, c.price, c.charges, c.notes, c.source, c.currency, c.country, id, userId],
   })
   if (res.rowsAffected === 0) {
     const e = new Error('Transaction not found')
@@ -133,22 +132,17 @@ export async function updateTransaction(id, tx) {
   return { id, ...c }
 }
 
-export async function deleteTransaction(id) {
+export async function deleteTransaction(userId, id) {
   await ensureTable()
-  await db.execute({ sql: `DELETE FROM transactions WHERE id=?`, args: [id] })
+  await db.execute({ sql: `DELETE FROM transactions WHERE id=? AND user_id=?`, args: [id, userId] })
 }
 
-// Bulk insert (CSV import or Paytm sync). Returns how many rows were added.
-// Real imports (CSV/manual) for a symbol SUPERSEDE any approximate Paytm "baseline"
-// rows for that symbol, so importing your tradebook replaces the synced placeholder.
-export async function importTransactions(rows) {
+export async function importTransactions(userId, rows) {
   await ensureTable()
   if (!Array.isArray(rows) || !rows.length) return { added: 0, skipped: 0, replacedBaseline: 0 }
   const createdAt = new Date().toISOString()
   let cleaned = rows.map(clean)
 
-  // De-dup within the batch by ext_id (broker trade/order id) so the same row isn't
-  // inserted twice, and across the DB so re-uploading the same tradebook is idempotent.
   const seen = new Set()
   cleaned = cleaned.filter((c) => {
     if (!c.extId) return true
@@ -161,41 +155,48 @@ export async function importTransactions(rows) {
   for (let i = 0; i < batchIds.length; i += 400) {
     const chunk = batchIds.slice(i, i + 400)
     const ph = chunk.map(() => '?').join(',')
-    const r = await db.execute({ sql: `SELECT ext_id FROM transactions WHERE ext_id IN (${ph})`, args: chunk })
+    const r = await db.execute({
+      sql: `SELECT ext_id FROM transactions WHERE user_id=? AND ext_id IN (${ph})`,
+      args: [userId, ...chunk],
+    })
     for (const row of r.rows) already.add(row.ext_id)
   }
   const toInsert = cleaned.filter((c) => !c.extId || !already.has(c.extId))
   const skipped = rows.length - toInsert.length
 
-  // Real imports for a symbol supersede any approximate Paytm baseline for that symbol.
   let replacedBaseline = 0
   const realSymbols = [...new Set(toInsert.filter((c) => c.source !== 'paytm').map((c) => c.symbol))]
   if (realSymbols.length) {
     const ph = realSymbols.map(() => '?').join(',')
-    const res = await db.execute({ sql: `DELETE FROM transactions WHERE source='paytm' AND symbol IN (${ph})`, args: realSymbols })
+    const res = await db.execute({
+      sql: `DELETE FROM transactions WHERE user_id=? AND source='paytm' AND symbol IN (${ph})`,
+      args: [userId, ...realSymbols],
+    })
     replacedBaseline = res.rowsAffected || 0
   }
 
   if (toInsert.length) {
     const stmts = toInsert.map((c) => ({
       sql: `INSERT INTO transactions
-              (id, security_id, symbol, name, exchange, type, date, quantity, price, charges, notes, source, currency, country, ext_id, created_at)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-      args: [randomUUID(), c.securityId, c.symbol, c.name, c.exchange, c.type, c.date, c.quantity, c.price, c.charges, c.notes, c.source, c.currency, c.country, c.extId, createdAt],
+              (id, user_id, security_id, symbol, name, exchange, type, date, quantity, price, charges, notes, source, currency, country, ext_id, created_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      args: [randomUUID(), userId, c.securityId, c.symbol, c.name, c.exchange, c.type, c.date, c.quantity, c.price, c.charges, c.notes, c.source, c.currency, c.country, c.extId, createdAt],
     }))
     await db.batch(stmts, 'write')
   }
   return { added: toInsert.length, skipped, replacedBaseline }
 }
 
-export async function clearTransactions() {
+export async function clearTransactions(userId) {
   await ensureTable()
-  await db.execute(`DELETE FROM transactions`)
+  await db.execute({ sql: `DELETE FROM transactions WHERE user_id=?`, args: [userId] })
 }
 
-// Clear only rows from a given source (e.g. 'paytm' baseline placeholders).
-export async function clearTransactionsBySource(source) {
+export async function clearTransactionsBySource(userId, source) {
   await ensureTable()
-  const res = await db.execute({ sql: `DELETE FROM transactions WHERE source=?`, args: [source] })
+  const res = await db.execute({
+    sql: `DELETE FROM transactions WHERE user_id=? AND source=?`,
+    args: [userId, source],
+  })
   return { deleted: res.rowsAffected || 0 }
 }

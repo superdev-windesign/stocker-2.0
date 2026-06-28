@@ -1,15 +1,10 @@
-// Standalone Express backend for Stocker (the "token helper" + Paytm REST proxy).
-//
-// Why a backend at all: Paytm's token exchange (request_token -> access tokens) can't
-// run in the browser — the endpoint blocks cross-origin calls and your api_secret must
-// never ship in frontend code. This server holds the secret, runs the exchange, persists
-// the session to Turso, and proxies Paytm's REST APIs using the server-side access_token.
-//
-// All shared Paytm + Turso logic lives in ./lib/paytm.js.
+// Stocker Express backend — multi-user edition.
+// Phase 1: email/password auth via JWT httpOnly cookie; all /api/* routes require userId.
 
 import 'dotenv/config'
 import express from 'express'
 import cors from 'cors'
+import cookieParser from 'cookie-parser'
 import {
   apiKey,
   LOGIN_URL,
@@ -19,6 +14,7 @@ import {
   exchangeRequestToken,
   clearTokens,
   paytmGet,
+  getPublicToken,
 } from './lib/paytm.js'
 import {
   listTransactions,
@@ -37,64 +33,75 @@ import { startScheduler } from './lib/scheduler.js'
 import { generateInsight } from './lib/insights.js'
 import { runAgent } from './lib/agent.js'
 import * as av from './lib/marketdata/alphavantage.js'
+import authRouter from './routes/auth.js'
+import { authMiddleware } from './middleware/authMiddleware.js'
 
 const PORT = Number(process.env.PORT || 5174)
 const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:5173'
 
 if (!apiKey) {
-  console.warn('\n[stocker] WARNING: PAYTM_API_KEY / PAYTM_API_SECRET missing in .env — token exchange will fail.\n')
+  console.warn('\n[stocker] WARNING: PAYTM_API_KEY / PAYTM_API_SECRET missing — Paytm connect will fail.\n')
 }
 
 const app = express()
-app.use(cors({ origin: FRONTEND_URL }))
+app.use(cors({ origin: FRONTEND_URL, credentials: true }))
 app.use(express.json())
+app.use(cookieParser())
 
-// Log every incoming request (method, path, query) — invaluable for debugging the login flow.
 app.use((req, res, next) => {
   const q = Object.keys(req.query).length ? ` query=${JSON.stringify(req.query)}` : ''
   console.log(`[stocker] ${req.method} ${req.path}${q}`)
   next()
 })
 
-// Lightweight health check for hosting platforms (Render/Railway) — always 200.
 app.get('/health', (req, res) => res.json({ ok: true }))
 
-// Step 1: send the user to Paytm's login page. ('/login' kept as a back-compat alias.)
+// ── Auth (no middleware) ──────────────────────────────────────────────────────
+app.use('/auth', authRouter)
+
+// ── All /api/* routes require a valid Stocker session ─────────────────────────
+app.use('/api', authMiddleware)
+
+// ── Paytm broker connect (requires Stocker session) ──────────────────────────
+// Step 1: redirect to Paytm login page.
 app.get(['/api/login', '/login'], (req, res) => {
   if (!apiKey) return res.status(500).send('PAYTM_API_KEY not configured in .env')
   const state = Math.random().toString(36).slice(2)
   res.redirect(`${LOGIN_URL}${apiKey}&state=${state}`)
 })
 
-// Local Return-URL callback. NOTE: in this deployment the Paytm Return URL points at the
-// hosted site, so Paytm redirects there (not here) and the React app exchanges the token
-// via POST /api/exchange. This handler stays for local-only return-url setups.
+// Legacy return-URL handler (kept for local-only setups).
 app.get('/', async (req, res) => {
   const requestToken = req.query.requestToken || req.query.request_token
   if (!requestToken) {
     return res.type('html').send(`
       <body style="font-family:system-ui;background:#0b0e11;color:#eaecef;display:grid;place-items:center;height:100vh;margin:0">
         <div style="text-align:center">
-          <h2>📈 Stocker — Paytm token helper</h2>
-          <p style="color:#9aa4b2">Click below to log in to Paytm and generate your access token.</p>
-          <a href="/api/login" style="display:inline-block;margin-top:8px;padding:10px 20px;background:#6366f1;color:#fff;border-radius:8px;text-decoration:none">Login with Paytm</a>
+          <h2>📈 Stocker</h2>
+          <p style="color:#9aa4b2">Multi-user portfolio analytics platform.</p>
         </div>
       </body>`)
   }
+  // Without userId we can't associate the token — redirect back with error.
+  res.redirect(`${FRONTEND_URL}/?error=${encodeURIComponent('Please log in to Stocker before connecting your broker')}`)
+})
+
+// Step 2: exchange Paytm request_token and bind it to the authenticated user.
+app.post('/api/exchange', async (req, res) => {
+  const requestToken = req.body?.request_token || req.body?.requestToken
+  if (!requestToken) return res.status(400).json({ error: 'request_token is required' })
   try {
-    await exchangeRequestToken(requestToken)
-    console.log('[stocker] tokens generated OK; session cached & persisted in Turso.')
-    res.redirect(`${FRONTEND_URL}/?connected=1`)
+    const tokens = await exchangeRequestToken(requestToken, req.userId)
+    res.json({ public_access_token: tokens.public_access_token })
   } catch (err) {
-    console.error('[stocker] exchange error:', err)
-    res.redirect(`${FRONTEND_URL}/?error=${encodeURIComponent(err.message)}`)
+    res.status(err.status || 500).json({ error: err.message })
   }
 })
 
-// Step 4: the React app reads the cached public_access_token here on load.
+// Read cached Paytm token for this user.
 app.get('/api/token', async (req, res) => {
-  const tokens = await getValidTokens()
-  if (!tokens?.public_access_token) return res.status(404).json({ error: 'No token yet. Log in first.' })
+  const tokens = await getValidTokens(req.userId)
+  if (!tokens?.public_access_token) return res.status(404).json({ error: 'Paytm not connected. Please connect your account.' })
   const exp = tokenExp(tokens.access_token)
   res.json({
     public_access_token: tokens.public_access_token,
@@ -103,11 +110,10 @@ app.get('/api/token', async (req, res) => {
   })
 })
 
-// Retrieve the stored token + expiry info (powers "copy stored token from DB").
 app.get('/api/token/retrieve', async (req, res) => {
-  const tokens = await getValidTokens()
+  const tokens = await getValidTokens(req.userId)
   if (!tokens?.public_access_token) {
-    return res.status(404).json({ error: 'No token stored. Please log in first.', public_access_token: null })
+    return res.status(404).json({ error: 'No Paytm token. Please connect your account.', public_access_token: null })
   }
   const exp = tokenExp(tokens.access_token)
   res.json({
@@ -119,21 +125,9 @@ app.get('/api/token/retrieve', async (req, res) => {
   })
 })
 
-// Manual exchange: POST { request_token }. Used by the React app on the Return-URL callback.
-app.post('/api/exchange', async (req, res) => {
-  const requestToken = req.body?.request_token || req.body?.requestToken
-  if (!requestToken) return res.status(400).json({ error: 'request_token is required' })
-  try {
-    const tokens = await exchangeRequestToken(requestToken)
-    res.json({ public_access_token: tokens.public_access_token })
-  } catch (err) {
-    res.status(err.status || 500).json({ error: err.message })
-  }
-})
-
-// Clear the cached session (Turso).
+// Disconnect Paytm broker account (not Stocker logout — that's POST /auth/logout).
 app.post('/api/logout', async (req, res) => {
-  await clearTokens()
+  await clearTokens(req.userId)
   res.json({ ok: true })
 })
 
@@ -143,23 +137,23 @@ const proxy = (fn) => async (req, res) => {
     res.json(await fn(req))
   } catch (err) {
     const status = err.status || 500
-    if (status === 401) return res.status(401).json({ error: 'Not logged in. Please log in to Paytm.' })
+    if (status === 401) return res.status(401).json({ error: 'Paytm not connected. Please connect your account.' })
     console.error(`[stocker] proxy error (${status}):`, err.message)
     res.status(status).json({ error: err.message })
   }
 }
 
-app.get('/api/holdings', proxy(async () => {
-  const holdings = await paytmGet('/holdings/v1/get-user-holdings-data')
-  const value = await paytmGet('/holdings/v1/get-holdings-value').catch(() => null)
+app.get('/api/holdings', proxy(async (req) => {
+  const holdings = await paytmGet('/holdings/v1/get-user-holdings-data', {}, req.userId)
+  const value = await paytmGet('/holdings/v1/get-holdings-value', {}, req.userId).catch(() => null)
   return { holdings, value }
 }))
 
-app.get('/api/orders', proxy(() => paytmGet('/orders/v1/user/orders')))
-app.get('/api/positions', proxy(() => paytmGet('/orders/v1/position')))
+app.get('/api/orders',    proxy((req) => paytmGet('/orders/v1/user/orders', {}, req.userId)))
+app.get('/api/positions', proxy((req) => paytmGet('/orders/v1/position', {}, req.userId)))
 
-app.get('/api/debug', proxy(async () => {
-  const safe = (p) => paytmGet(p).catch((e) => ({ __error: e.message, __status: e.status }))
+app.get('/api/debug', proxy(async (req) => {
+  const safe = (p) => paytmGet(p, {}, req.userId).catch((e) => ({ __error: e.message, __status: e.status }))
   const [holdings, positions, orders] = await Promise.all([
     safe('/holdings/v1/get-user-holdings-data'),
     safe('/orders/v1/position'),
@@ -168,13 +162,12 @@ app.get('/api/debug', proxy(async () => {
   return { holdings, positions, orders }
 }))
 
-app.get('/api/funds', proxy(() => paytmGet('/accounts/v1/funds/summary', { config: 'false' })))
-app.get('/api/profile', proxy(() => paytmGet('/accounts/v1/user/details')))
-app.get('/api/price-chart', proxy((req) => paytmGet('/data/v1/price-charts/sym', req.query)))
-app.get('/api/quote', proxy((req) => paytmGet('/data/v1/price/live', req.query)))
+app.get('/api/funds',       proxy((req) => paytmGet('/accounts/v1/funds/summary', { config: 'false' }, req.userId)))
+app.get('/api/profile',     proxy((req) => paytmGet('/accounts/v1/user/details', {}, req.userId)))
+app.get('/api/price-chart', proxy((req) => paytmGet('/data/v1/price-charts/sym', req.query, req.userId)))
+app.get('/api/quote',       proxy((req) => paytmGet('/data/v1/price/live', req.query, req.userId)))
 
-// ── Transaction ledger (lifetime buy/sell history) ───────────────────────────
-// Persisted in Turso. Powers Stock Journey, trade analytics, re-entry tracking.
+// ── Transaction ledger ────────────────────────────────────────────────────────
 const ledgerHandler = (fn) => async (req, res) => {
   try {
     res.json(await fn(req))
@@ -185,27 +178,17 @@ const ledgerHandler = (fn) => async (req, res) => {
   }
 }
 
-app.get('/api/transactions', ledgerHandler(() => listTransactions()))
-app.post('/api/transactions', ledgerHandler((req) => addTransaction(req.body)))
-app.post('/api/transactions/import', ledgerHandler((req) => importTransactions(req.body?.transactions || req.body)))
-app.put('/api/transactions/:id', ledgerHandler((req) => updateTransaction(req.params.id, req.body)))
-app.delete('/api/transactions/:id', ledgerHandler(async (req) => {
-  await deleteTransaction(req.params.id)
-  return { ok: true }
-}))
-app.delete('/api/transactions/source/:source', ledgerHandler((req) => clearTransactionsBySource(req.params.source)))
-app.delete('/api/transactions', ledgerHandler(async () => {
-  await clearTransactions()
-  return { ok: true }
-}))
+app.get('/api/transactions',                  ledgerHandler((req) => listTransactions(req.userId)))
+app.post('/api/transactions',                 ledgerHandler((req) => addTransaction(req.userId, req.body)))
+app.post('/api/transactions/import',          ledgerHandler((req) => importTransactions(req.userId, req.body?.transactions || req.body)))
+app.put('/api/transactions/:id',              ledgerHandler((req) => updateTransaction(req.userId, req.params.id, req.body)))
+app.delete('/api/transactions/:id',           ledgerHandler(async (req) => { await deleteTransaction(req.userId, req.params.id); return { ok: true } }))
+app.delete('/api/transactions/source/:source',ledgerHandler((req) => clearTransactionsBySource(req.userId, req.params.source)))
+app.delete('/api/transactions',               ledgerHandler(async (req) => { await clearTransactions(req.userId); return { ok: true } }))
 
-// Portfolio NAV time-series (populated daily by the scheduler; empty until then).
-app.get('/api/nav', ledgerHandler(() => listSnapshots()))
+app.get('/api/nav', ledgerHandler((req) => listSnapshots(req.userId)))
 
-// ── INDmoney / INDstocks provider (US + Indian stocks) ──────────────────────
-// Token-based: user logs in on INDstocks, pastes/issues a token to /exchange, which
-// is stored; data routes proxy the INDstocks REST API with it. Needs INDSTOCKS_API_BASE
-// (+ a token) configured to work — returns clear errors until then.
+// ── INDmoney / INDstocks provider ─────────────────────────────────────────────
 const indmoneyHandler = (fn) => async (req, res) => {
   try {
     res.json(await fn(req))
@@ -215,62 +198,48 @@ const indmoneyHandler = (fn) => async (req, res) => {
     res.status(status).json({ error: err.message })
   }
 }
-app.post('/api/indmoney/exchange', indmoneyHandler((req) => indmoney.exchangeRequestToken(req.body)))
-app.get('/api/indmoney/token', indmoneyHandler(() => indmoney.getToken()))
+app.post('/api/indmoney/exchange',    indmoneyHandler((req) => indmoney.exchangeRequestToken(req.body)))
+app.get('/api/indmoney/token',        indmoneyHandler(() => indmoney.getToken()))
 app.get('/api/indmoney/token/retrieve', indmoneyHandler(() => indmoney.getToken()))
-app.get('/api/indmoney/holdings', indmoneyHandler(() => indmoney.getHoldings()))
-app.get('/api/indmoney/quote', indmoneyHandler((req) => indmoney.getQuote(req.query)))
+app.get('/api/indmoney/holdings',     indmoneyHandler(() => indmoney.getHoldings()))
+app.get('/api/indmoney/quote',        indmoneyHandler((req) => indmoney.getQuote(req.query)))
 
-// ── Alert engine + notifications (Phase 4) ───────────────────────────────────
-app.get('/api/alerts', ledgerHandler(() => listAlerts()))
-app.post('/api/alerts', ledgerHandler((req) => addAlert(req.body)))
-app.post('/api/alerts/:id/pause', ledgerHandler((req) => updateAlertStatus(req.params.id, 'PAUSED')))
-app.post('/api/alerts/:id/resume', ledgerHandler((req) => updateAlertStatus(req.params.id, 'ACTIVE')))
-app.delete('/api/alerts/:id', ledgerHandler(async (req) => {
-  await deleteAlert(req.params.id)
-  return { ok: true }
-}))
+// ── Alerts + notifications ─────────────────────────────────────────────────────
+app.get('/api/alerts',              ledgerHandler((req) => listAlerts(req.userId)))
+app.post('/api/alerts',             ledgerHandler((req) => addAlert(req.userId, req.body)))
+app.post('/api/alerts/:id/pause',   ledgerHandler((req) => updateAlertStatus(req.userId, req.params.id, 'PAUSED')))
+app.post('/api/alerts/:id/resume',  ledgerHandler((req) => updateAlertStatus(req.userId, req.params.id, 'ACTIVE')))
+app.delete('/api/alerts/:id',       ledgerHandler(async (req) => { await deleteAlert(req.userId, req.params.id); return { ok: true } }))
 
-// Manual evaluation — drives the engine end-to-end without the scheduler/network.
-// Body: { priceMap: { SYMBOL: { last, changePct, high52, low52 } }, portfolioPnlPct }
 app.post('/api/alerts/evaluate-now', ledgerHandler(async (req) => {
-  const fired = await evaluateAlerts(req.body?.priceMap || {}, { portfolioPnlPct: req.body?.portfolioPnlPct })
+  const fired = await evaluateAlerts(req.userId, req.body?.priceMap || {}, { portfolioPnlPct: req.body?.portfolioPnlPct })
   for (const f of fired) {
-    await notify(f.alert.channels, { title: f.title, body: f.body, symbol: f.alert.symbol, alertId: f.alert.id, kind: 'ALERT' })
+    await notify(req.userId, f.alert.channels, { title: f.title, body: f.body, symbol: f.alert.symbol, alertId: f.alert.id, kind: 'ALERT' })
   }
   return { fired: fired.map((f) => ({ id: f.alert.id, title: f.title })) }
 }))
 
-app.get('/api/notifications', ledgerHandler(() => listNotifications()))
-app.post('/api/notifications/read', ledgerHandler(async (req) => {
-  await markRead(req.body?.id)
-  return { ok: true }
-}))
-app.post('/api/notifications/read-all', ledgerHandler(async () => {
-  await markAllRead()
-  return { ok: true }
-}))
+app.get('/api/notifications',        ledgerHandler((req) => listNotifications(req.userId)))
+app.post('/api/notifications/read',  ledgerHandler(async (req) => { await markRead(req.userId, req.body?.id); return { ok: true } }))
+app.post('/api/notifications/read-all', ledgerHandler(async (req) => { await markAllRead(req.userId); return { ok: true } }))
 
-// ── AI Portfolio Analyst (Phase 5) ───────────────────────────────────────────
-// Body: { scope: 'daily'|'weekly', payload: <compact metrics>, refresh?: bool }
+// ── AI Portfolio Analyst ──────────────────────────────────────────────────────
 app.post('/api/insights', ledgerHandler((req) =>
   generateInsight(req.body?.scope || 'daily', req.body?.payload || {}, { refresh: !!req.body?.refresh }),
 ))
 
-// Agentic Copilot — tool-calling chat grounded in the portfolio snapshot.
 app.post('/api/agent', ledgerHandler((req) =>
   runAgent(req.body?.message || '', req.body?.context || {}, req.body?.history || []),
 ))
 
-// ── Market data (AlphaVantage) — independent whole-market feed ────────────────
-app.get('/api/market/quote', ledgerHandler((req) => av.quote(String(req.query.symbol || '').toUpperCase())))
+// ── Market data (AlphaVantage) ────────────────────────────────────────────────
+app.get('/api/market/quote',   ledgerHandler((req) => av.quote(String(req.query.symbol || '').toUpperCase())))
 app.get('/api/market/history', ledgerHandler((req) => av.history(String(req.query.symbol || '').toUpperCase(), req.query.full === '1')))
-app.get('/api/market/search', ledgerHandler((req) => av.search(String(req.query.q || ''))))
-app.get('/api/market/movers', ledgerHandler(() => av.movers()))
-app.get('/api/market/overview', ledgerHandler((req) => av.overview(String(req.query.symbol || '').toUpperCase())))
+app.get('/api/market/search',  ledgerHandler((req) => av.search(String(req.query.q || ''))))
+app.get('/api/market/movers',  ledgerHandler(() => av.movers()))
+app.get('/api/market/overview',ledgerHandler((req) => av.overview(String(req.query.symbol || '').toUpperCase())))
 
 app.listen(PORT, () => {
-  console.log(`\n[stocker] token helper running on http://localhost:${PORT}`)
-  console.log(`[stocker] Start login at: http://localhost:${PORT}/api/login\n`)
+  console.log(`\n[stocker] backend running on http://localhost:${PORT}`)
   startScheduler()
 })

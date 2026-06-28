@@ -4,7 +4,7 @@ const BACKEND_URL =
 
 async function get(path, params) {
   const qs = params ? `?${new URLSearchParams(params)}` : ''
-  const res = await fetch(`${BACKEND_URL}${path}${qs}`)
+  const res = await fetch(`${BACKEND_URL}${path}${qs}`, { credentials: 'include' })
   const body = await res.json().catch(() => ({}))
   if (!res.ok) {
     const err = new Error(body?.error || `Request failed (${res.status})`)

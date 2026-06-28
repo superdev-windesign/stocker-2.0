@@ -5,7 +5,7 @@ import { AlertsProvider } from './context/AlertsContext'
 import { ThemeToggle } from './components/common/ui'
 import ErrorBoundary from './components/ErrorBoundary'
 import NotificationBell from './components/NotificationBell'
-import TokenGate from './components/TokenGate'
+import Login from './routes/Login'
 import PortfolioDashboard from './routes/PortfolioDashboard'
 import StockDetail from './routes/StockDetail'
 import LivePage from './routes/LivePage'
@@ -35,7 +35,7 @@ function NavTab({ to, children }) {
 }
 
 function Layout({ children }) {
-  const { logout, demo, setDemo } = useAuth()
+  const { user, logout, demo, setDemo } = useAuth()
   const navigate = useNavigate()
   const location = useLocation()
   return (
@@ -65,6 +65,11 @@ function Layout({ children }) {
           </nav>
           <div className="flex items-center gap-2">
             <NotificationBell />
+            {user && (
+              <span className="hidden text-xs text-slate-400 dark:text-slate-500 sm:block">
+                {user.name || user.email}
+              </span>
+            )}
             <button
               onClick={() => setDemo(!demo)}
               title="Toggle demo data"
@@ -94,20 +99,28 @@ function Layout({ children }) {
 }
 
 export default function App() {
-  const { token, setToken, authError, checking, demo, setDemo, provider } = useAuth()
+  const { user, token, setToken, authError, checking, demo, setDemo, provider } = useAuth()
 
   if (checking) {
     return (
       <div className="flex min-h-screen items-center justify-center text-slate-400">
-        Loading session…
+        Loading…
       </div>
     )
   }
 
-  if (!token && !demo) {
-    return <TokenGate onConnect={setToken} onDemo={() => setDemo(true)} error={authError} />
+  // Not logged into Stocker → show login page.
+  if (!user && !demo) {
+    return (
+      <Routes>
+        <Route path="/login" element={<Login />} />
+        <Route path="*" element={<Navigate to="/login" replace />} />
+      </Routes>
+    )
   }
 
+  // Logged in (or demo) → show the app.
+  // The broker token (Paytm) is optional; the app works without it (ledger-only mode).
   return (
     <PortfolioProvider>
       <AlertsProvider>
@@ -117,14 +130,15 @@ export default function App() {
               path="/"
               element={provider === 'alphavantage' ? <Navigate to="/markets" replace /> : <PortfolioDashboard />}
             />
-            <Route path="/markets" element={<Markets />} />
-            <Route path="/copilot" element={<Copilot />} />
-            <Route path="/ledger" element={<Ledger />} />
-            <Route path="/tax" element={<Tax />} />
-            <Route path="/rebalance" element={<Rebalance />} />
-            <Route path="/alerts" element={<Alerts />} />
+            <Route path="/markets"          element={<Markets />} />
+            <Route path="/copilot"          element={<Copilot />} />
+            <Route path="/ledger"           element={<Ledger />} />
+            <Route path="/tax"              element={<Tax />} />
+            <Route path="/rebalance"        element={<Rebalance />} />
+            <Route path="/alerts"           element={<Alerts />} />
             <Route path="/stock/:securityId" element={<StockDetail />} />
-            <Route path="/live" element={<LivePage />} />
+            <Route path="/live"             element={<LivePage />} />
+            <Route path="/login"            element={<Navigate to="/" replace />} />
           </Routes>
         </Layout>
       </AlertsProvider>
