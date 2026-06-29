@@ -72,9 +72,10 @@ export function PortfolioProvider({ children }) {
       if (h.status === 'fulfilled') {
         setHoldings(normalizeHoldingsFor(activeProvider, h.value))
         setHoldingsValue(h.value?.value || null)
-      } else if (h.reason?.status === 401) {
+      } else if (h.reason?.status === 401 && activeProvider !== 'csv') {
+        // CSV mode has no broker token — a 401 just means the Stocker session expired.
         setNeedsLogin(true)
-      } else {
+      } else if (activeProvider !== 'csv') {
         setError(h.reason?.message || 'Failed to load holdings')
       }
 
@@ -92,16 +93,36 @@ export function PortfolioProvider({ children }) {
     load()
   }, [load])
 
-  // Reload only the ledger (after a mutation), leaving holdings/quotes untouched.
+  // Auto-refresh CSV holdings + live prices every 60 s (Yahoo cache TTL).
+  useEffect(() => {
+    if (activeProvider !== 'csv' || demo) return
+    const id = setInterval(async () => {
+      try {
+        const data = await fetchHoldings('csv')
+        setHoldings(normalizeHoldingsFor('csv', data))
+      } catch {}
+    }, 60_000)
+    return () => clearInterval(id)
+  }, [activeProvider, demo])
+
+  // Reload ledger + CSV-derived holdings together so mutations instantly reflect in the portfolio.
   const reloadTransactions = useCallback(async () => {
     if (demo) return
     try {
-      const list = await fetchTransactions()
-      setTransactions(Array.isArray(list) ? list : [])
+      const [txnResult, holdResult] = await Promise.allSettled([
+        fetchTransactions(),
+        activeProvider === 'csv' ? fetchHoldings('csv') : Promise.resolve(null),
+      ])
+      if (txnResult.status === 'fulfilled') {
+        setTransactions(Array.isArray(txnResult.value) ? txnResult.value : [])
+      }
+      if (activeProvider === 'csv' && holdResult.status === 'fulfilled' && holdResult.value != null) {
+        setHoldings(normalizeHoldingsFor('csv', holdResult.value))
+      }
     } catch (e) {
       setError(e.message)
     }
-  }, [demo])
+  }, [demo, activeProvider])
 
   // ── Ledger mutations (demo edits local state; live hits the API then refetches) ──
   const addTxn = useCallback(

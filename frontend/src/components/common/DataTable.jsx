@@ -145,14 +145,14 @@ export default function DataTable({
             <button
               onClick={() => setPage((p) => Math.max(0, p - 1))}
               disabled={current === 0}
-              className="rounded border border-slate-200 px-2 py-1 disabled:opacity-40 dark:border-white/10"
+              className="rounded border border-slate-200 px-2 py-1 transition hover:border-slate-400 hover:bg-slate-50 disabled:opacity-40 disabled:hover:border-slate-200 disabled:hover:bg-transparent dark:border-white/10 dark:hover:border-white/30 dark:hover:bg-white/5"
             >
               Prev
             </button>
             <button
               onClick={() => setPage((p) => Math.min(pageCount - 1, p + 1))}
               disabled={current >= pageCount - 1}
-              className="rounded border border-slate-200 px-2 py-1 disabled:opacity-40 dark:border-white/10"
+              className="rounded border border-slate-200 px-2 py-1 transition hover:border-slate-400 hover:bg-slate-50 disabled:opacity-40 disabled:hover:border-slate-200 disabled:hover:bg-transparent dark:border-white/10 dark:hover:border-white/30 dark:hover:bg-white/5"
             >
               Next
             </button>

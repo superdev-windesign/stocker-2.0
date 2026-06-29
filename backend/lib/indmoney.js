@@ -1,68 +1,74 @@
 // INDstocks / INDmoney provider adapter (US + Indian stocks).
-//
-// Based on the INDstocks API skill: token-based auth (log in -> auth token -> send the
-// token in a header on every request), REST endpoints for holdings, quotes, historical
-// data, and a WebSocket for streaming. The skill documents the *structure*; the exact
-// base URL, paths, header name and response field names must be confirmed against
-// https://api-docs.indstocks.com (reachable from the deployed backend, not the dev sandbox).
-// Those specifics are therefore ENV-CONFIGURABLE so they can be corrected without code
-// changes. This app is read-only (no order placement).
-//
-// Auth model used here (lowest-risk, matches the rest of Stocker): the user logs in on
-// INDstocks, obtains an access token, and we store it server-side in Turso; all data
-// calls send it via the auth header. An OAuth redirect flow can replace exchange() later.
+// Token storage uses the shared broker_accounts table (user-scoped).
+// Phase 3: tokens are AES-256-GCM encrypted at rest via crypto.js.
 import { db } from './paytm.js'
+import { randomUUID } from 'node:crypto'
+import { encryptJson, decryptJson, isEncrypted } from './crypto.js'
 
-// Defaults from INDstocks docs: base https://api.indstocks.com, portfolio under /portfolio,
-// quotes under /market/quotes. Exact sub-paths are overridable via env if they differ.
 const API_BASE = (process.env.INDSTOCKS_API_BASE || 'https://api.indstocks.com').replace(/\/$/, '')
 const AUTH_HEADER = process.env.INDSTOCKS_AUTH_HEADER || 'Authorization'
-const AUTH_SCHEME = process.env.INDSTOCKS_AUTH_SCHEME ?? 'Bearer ' // set to '' for a bare token
-// A static API key (no secret needed) — used directly as the bearer for every request.
-// If set, no login/token-paste is required.
+const AUTH_SCHEME = process.env.INDSTOCKS_AUTH_SCHEME ?? 'Bearer '
 const API_KEY = process.env.INDMONEY_API_KEY || process.env.INDSTOCKS_API_KEY || ''
-const PATH_HOLDINGS = process.env.INDSTOCKS_PATH_HOLDINGS || '/portfolio/holdings'
-const PATH_QUOTE = process.env.INDSTOCKS_PATH_QUOTE || '/market/quotes'
+const PATH_HOLDINGS   = process.env.INDSTOCKS_PATH_HOLDINGS   || '/portfolio/holdings'
+const PATH_QUOTE      = process.env.INDSTOCKS_PATH_QUOTE      || '/market/quotes'
 const PATH_HISTORICAL = process.env.INDSTOCKS_PATH_HISTORICAL || '/market/historical'
 
-export const isConfigured = () => Boolean(API_BASE && (API_KEY || true))
+export const isConfigured = () => Boolean(API_BASE)
 
-let tableReady = false
-async function ensureTable() {
-  if (tableReady) return
-  await db.execute(`
-    CREATE TABLE IF NOT EXISTS indmoney_session (
-      id       INTEGER PRIMARY KEY CHECK (id = 1),
-      data     TEXT NOT NULL,
-      saved_at TEXT NOT NULL
-    )
-  `)
-  tableReady = true
-}
+// ── Per-user token ops via broker_accounts ────────────────────────────────────
+// broker_accounts is created by paytm.js ensureBrokerAccountsTable(); no ensureTable needed here.
 
-export async function saveToken(tokens) {
-  await ensureTable()
+export async function saveToken(userId, tokens) {
   await db.execute({
-    sql: `INSERT INTO indmoney_session (id, data, saved_at) VALUES (1, ?, ?)
-          ON CONFLICT(id) DO UPDATE SET data = excluded.data, saved_at = excluded.saved_at`,
-    args: [JSON.stringify(tokens), new Date().toISOString()],
+    sql: `INSERT INTO broker_accounts (id, user_id, provider, token_enc, status, saved_at)
+          VALUES (?, ?, 'indmoney', ?, 'active', ?)
+          ON CONFLICT(user_id, provider) DO UPDATE SET
+            token_enc = excluded.token_enc,
+            status    = 'active',
+            saved_at  = excluded.saved_at`,
+    args: [randomUUID(), userId, encryptJson(tokens), new Date().toISOString()],
   })
 }
 
-export async function getStoredToken() {
-  await ensureTable()
-  const res = await db.execute(`SELECT data FROM indmoney_session WHERE id = 1`)
-  if (!res.rows.length) return null
-  try {
-    return JSON.parse(res.rows[0].data)
-  } catch {
-    return null
+export async function getStoredToken(userId) {
+  // If a global API key is configured, every user is implicitly "connected".
+  if (API_KEY) {
+    return { access_token: API_KEY, public_access_token: 'indstocks-connected', generated_at: new Date().toISOString() }
   }
+  const res = await db.execute({
+    sql:  `SELECT token_enc FROM broker_accounts WHERE user_id = ? AND provider = 'indmoney'`,
+    args: [userId],
+  })
+  if (!res.rows.length) return null
+
+  const stored = res.rows[0].token_enc
+  const tokens = decryptJson(stored)
+  if (!tokens) return null
+
+  // Lazy re-encryption: if stored value was plaintext, encrypt it now.
+  if (!isEncrypted(stored)) {
+    try {
+      await db.execute({
+        sql:  `UPDATE broker_accounts SET token_enc = ? WHERE user_id = ? AND provider = 'indmoney'`,
+        args: [encryptJson(tokens), userId],
+      })
+    } catch (err) {
+      console.warn('[stocker] indmoney re-encrypt failed:', err.message)
+    }
+  }
+
+  return tokens
 }
 
-// Accepts a pasted/issued access token and persists it. (Swap for a real OAuth
-// request-token exchange once the INDstocks login flow specifics are confirmed.)
-export async function exchangeRequestToken(body = {}) {
+export async function clearToken(userId) {
+  await db.execute({
+    sql:  `DELETE FROM broker_accounts WHERE user_id = ? AND provider = 'indmoney'`,
+    args: [userId],
+  })
+}
+
+// Accepts a pasted access token and persists it under the user's account.
+export async function exchangeRequestToken(userId, body = {}) {
   const token = body.access_token || body.token || body.request_token
   if (!token) {
     const e = new Error('access token is required')
@@ -70,73 +76,58 @@ export async function exchangeRequestToken(body = {}) {
     throw e
   }
   const tokens = { access_token: token, public_access_token: token, generated_at: new Date().toISOString() }
-  await saveToken(tokens)
+  await saveToken(userId, tokens)
   return { public_access_token: token }
 }
 
-export async function getToken() {
-  // With a server-side API key, the user is "connected" without pasting anything.
+export async function getToken(userId) {
   if (API_KEY) {
     return { public_access_token: 'indstocks-connected', generated_at: new Date().toISOString(), expires_at: null }
   }
-  const t = await getStoredToken()
+  const t = await getStoredToken(userId)
   if (!t?.public_access_token) {
-    const e = new Error('No INDstocks token stored. Please log in / paste a token first.')
+    const e = new Error('INDstocks not connected. Please connect your account.')
     e.status = 404
     throw e
   }
-  return {
-    public_access_token: t.public_access_token,
-    generated_at: t.generated_at,
-    expires_at: t.expires_at || null,
-  }
+  return { public_access_token: t.public_access_token, generated_at: t.generated_at, expires_at: t.expires_at || null }
 }
 
-// The bearer used for API calls: the static API key if configured, else a stored token.
-async function authValue() {
+async function authValue(userId) {
   if (API_KEY) return API_KEY
-  const t = await getStoredToken()
+  const t = await getStoredToken(userId)
   return t?.access_token || null
 }
 
-// Authenticated GET against the INDstocks REST API.
-export async function indGet(path, query = {}) {
+export async function indGet(path, query = {}, userId) {
   if (!API_BASE) {
     const e = new Error('INDSTOCKS_API_BASE not configured')
     e.status = 501
     throw e
   }
-  const token = await authValue()
+  const token = await authValue(userId)
   if (!token) {
-    const e = new Error('Not logged in to INDstocks (set INDMONEY_API_KEY or paste a token)')
+    const e = new Error('INDstocks not connected. Please connect your account.')
     e.status = 401
     throw e
   }
   const qs = new URLSearchParams(query).toString()
   const url = `${API_BASE}${path}${qs ? `?${qs}` : ''}`
   const resp = await fetch(url, {
-    headers: {
-      'Content-Type': 'application/json',
-      [AUTH_HEADER]: `${AUTH_SCHEME}${token}`,
-    },
+    headers: { 'Content-Type': 'application/json', [AUTH_HEADER]: `${AUTH_SCHEME}${token}` },
   })
   const text = await resp.text()
-  let bodyOut
-  try {
-    bodyOut = JSON.parse(text)
-  } catch {
-    bodyOut = text
-  }
+  let body
+  try { body = JSON.parse(text) } catch { body = text }
   if (!resp.ok) {
-    const e = new Error(typeof bodyOut === 'string' ? bodyOut : JSON.stringify(bodyOut))
+    const msg = typeof body === 'string' ? body : (body?.message || body?.error || JSON.stringify(body))
+    const e = new Error(msg)
     e.status = resp.status
     throw e
   }
-  return bodyOut
+  return body
 }
 
-// Read-only portfolio data. Response shapes are passed through; the field mapping to the
-// app's normalized shape is finalized once a real response is observed on the docs/deploy.
-export const getHoldings = () => indGet(PATH_HOLDINGS)
-export const getQuote = (query) => indGet(PATH_QUOTE, query)
-export const getHistorical = (query) => indGet(PATH_HISTORICAL, query)
+export const getHoldings  = (userId) => indGet(PATH_HOLDINGS, {}, userId)
+export const getQuote     = (query, userId) => indGet(PATH_QUOTE, query, userId)
+export const getHistorical = (query, userId) => indGet(PATH_HISTORICAL, query, userId)

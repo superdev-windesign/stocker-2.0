@@ -127,3 +127,29 @@ export const overview = (symbol) =>
       week52Low: num(o['52WeekLow']),
     }
   })
+
+// News & sentiment (up to 50 articles). tickers = comma-separated string e.g. "AAPL,TSLA"
+// topics = comma-separated e.g. "technology,earnings"
+export const news = (tickers = '', topics = '') =>
+  memo(`news:${tickers}:${topics}`, 10 * 60_000, async () => {
+    const params = { function: 'NEWS_SENTIMENT', limit: 50, sort: 'LATEST' }
+    if (tickers) params.tickers = tickers
+    if (topics) params.topics = topics
+    const j = await av(params)
+    const items = j.feed || []
+    return items.map((a) => ({
+      title: a.title,
+      url: a.url,
+      source: a.source,
+      summary: a.summary,
+      publishedAt: a.time_published,        // e.g. "20241128T130000"
+      overallSentiment: a.overall_sentiment_label || null,
+      overallScore: num(a.overall_sentiment_score),
+      tickers: (a.ticker_sentiment || []).map((t) => ({
+        ticker: t.ticker,
+        sentiment: t.ticker_sentiment_label,
+        score: num(t.ticker_sentiment_score),
+      })),
+      topics: (a.topics || []).map((t) => t.topic),
+    }))
+  })

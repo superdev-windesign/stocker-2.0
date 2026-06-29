@@ -2,10 +2,12 @@ import { Routes, Route, Navigate, NavLink, useNavigate, useLocation } from 'reac
 import { useAuth } from './context/AuthContext'
 import { PortfolioProvider } from './context/PortfolioContext'
 import { AlertsProvider } from './context/AlertsContext'
+import { WatchlistProvider } from './context/WatchlistContext'
 import { ThemeToggle } from './components/common/ui'
 import ErrorBoundary from './components/ErrorBoundary'
 import NotificationBell from './components/NotificationBell'
 import Login from './routes/Login'
+import BrokerConnect from './routes/BrokerConnect'
 import PortfolioDashboard from './routes/PortfolioDashboard'
 import StockDetail from './routes/StockDetail'
 import LivePage from './routes/LivePage'
@@ -35,7 +37,7 @@ function NavTab({ to, children }) {
 }
 
 function Layout({ children }) {
-  const { user, logout, demo, setDemo } = useAuth()
+  const { user, token, logout, demo, setDemo } = useAuth()
   const navigate = useNavigate()
   const location = useLocation()
   return (
@@ -44,7 +46,7 @@ function Layout({ children }) {
         <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-3">
           <button
             onClick={() => navigate('/')}
-            className="flex items-center gap-2 text-lg font-bold tracking-tight text-slate-900 dark:text-slate-100"
+            className="flex items-center gap-2 rounded-lg text-lg font-bold tracking-tight text-slate-900 transition hover:opacity-70 dark:text-slate-100"
           >
             📈 Stocker
             {demo && (
@@ -65,6 +67,18 @@ function Layout({ children }) {
           </nav>
           <div className="flex items-center gap-2">
             <NotificationBell />
+            {/* Broker connection status pill */}
+            <button
+              onClick={() => navigate('/connect')}
+              title="Manage broker connections"
+              className={`hidden rounded-full px-2.5 py-0.5 text-xs font-medium transition sm:block ${
+                token
+                  ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200 dark:bg-emerald-900/30 dark:text-emerald-400'
+                  : 'bg-slate-100 text-slate-500 hover:bg-slate-200 dark:bg-white/5 dark:text-slate-500 dark:hover:bg-white/10'
+              }`}
+            >
+              {token ? '● Broker' : '○ Connect'}
+            </button>
             {user && (
               <span className="hidden text-xs text-slate-400 dark:text-slate-500 sm:block">
                 {user.name || user.email}
@@ -124,6 +138,7 @@ export default function App() {
   return (
     <PortfolioProvider>
       <AlertsProvider>
+       <WatchlistProvider>
         <Layout>
           <Routes>
             <Route
@@ -137,10 +152,13 @@ export default function App() {
             <Route path="/rebalance"        element={<Rebalance />} />
             <Route path="/alerts"           element={<Alerts />} />
             <Route path="/stock/:securityId" element={<StockDetail />} />
+            <Route path="/stock/sym/:symbol"  element={<StockDetail />} />
             <Route path="/live"             element={<LivePage />} />
+            <Route path="/connect"          element={<BrokerConnect />} />
             <Route path="/login"            element={<Navigate to="/" replace />} />
           </Routes>
         </Layout>
+       </WatchlistProvider>
       </AlertsProvider>
     </PortfolioProvider>
   )

@@ -33,8 +33,12 @@ import { startScheduler } from './lib/scheduler.js'
 import { generateInsight } from './lib/insights.js'
 import { runAgent } from './lib/agent.js'
 import * as av from './lib/marketdata/alphavantage.js'
+import * as yahoo from './lib/marketdata/yahoo.js'
 import authRouter from './routes/auth.js'
 import { authMiddleware } from './middleware/authMiddleware.js'
+import { ensureBrokerAccountsTable } from './lib/paytm.js'
+import { getDerivedHoldings } from './lib/holdings.js'
+import { listWatchlists, createWatchlist, deleteWatchlist, addItem, removeItem, ensureWatchlistTables } from './lib/watchlists.js'
 
 const PORT = Number(process.env.PORT || 5174)
 const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:5173'
@@ -149,6 +153,16 @@ app.get('/api/holdings', proxy(async (req) => {
   return { holdings, value }
 }))
 
+// Derived holdings from ledger transactions + live Yahoo Finance quotes (CSV mode)
+app.get('/api/holdings/derived', async (req, res) => {
+  try {
+    const holdings = await getDerivedHoldings(req.userId)
+    res.json(holdings)
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
 app.get('/api/orders',    proxy((req) => paytmGet('/orders/v1/user/orders', {}, req.userId)))
 app.get('/api/positions', proxy((req) => paytmGet('/orders/v1/position', {}, req.userId)))
 
@@ -198,11 +212,12 @@ const indmoneyHandler = (fn) => async (req, res) => {
     res.status(status).json({ error: err.message })
   }
 }
-app.post('/api/indmoney/exchange',    indmoneyHandler((req) => indmoney.exchangeRequestToken(req.body)))
-app.get('/api/indmoney/token',        indmoneyHandler(() => indmoney.getToken()))
-app.get('/api/indmoney/token/retrieve', indmoneyHandler(() => indmoney.getToken()))
-app.get('/api/indmoney/holdings',     indmoneyHandler(() => indmoney.getHoldings()))
-app.get('/api/indmoney/quote',        indmoneyHandler((req) => indmoney.getQuote(req.query)))
+app.post('/api/indmoney/exchange',      indmoneyHandler((req) => indmoney.exchangeRequestToken(req.userId, req.body)))
+app.post('/api/indmoney/logout',        indmoneyHandler(async (req) => { await indmoney.clearToken(req.userId); return { ok: true } }))
+app.get('/api/indmoney/token',         indmoneyHandler((req) => indmoney.getToken(req.userId)))
+app.get('/api/indmoney/token/retrieve',indmoneyHandler((req) => indmoney.getToken(req.userId)))
+app.get('/api/indmoney/holdings',      indmoneyHandler((req) => indmoney.getHoldings(req.userId)))
+app.get('/api/indmoney/quote',         indmoneyHandler((req) => indmoney.getQuote(req.query, req.userId)))
 
 // ── Alerts + notifications ─────────────────────────────────────────────────────
 app.get('/api/alerts',              ledgerHandler((req) => listAlerts(req.userId)))
@@ -233,13 +248,56 @@ app.post('/api/agent', ledgerHandler((req) =>
 ))
 
 // ── Market data (AlphaVantage) ────────────────────────────────────────────────
-app.get('/api/market/quote',   ledgerHandler((req) => av.quote(String(req.query.symbol || '').toUpperCase())))
-app.get('/api/market/history', ledgerHandler((req) => av.history(String(req.query.symbol || '').toUpperCase(), req.query.full === '1')))
-app.get('/api/market/search',  ledgerHandler((req) => av.search(String(req.query.q || ''))))
-app.get('/api/market/movers',  ledgerHandler(() => av.movers()))
-app.get('/api/market/overview',ledgerHandler((req) => av.overview(String(req.query.symbol || '').toUpperCase())))
+app.get('/api/market/quote',     ledgerHandler((req) => av.quote(String(req.query.symbol || '').toUpperCase())))
+app.get('/api/market/history',   ledgerHandler((req) => av.history(String(req.query.symbol || '').toUpperCase(), req.query.full === '1')))
+app.get('/api/market/search',    ledgerHandler((req) => av.search(String(req.query.q || ''))))
+app.get('/api/market/movers',    ledgerHandler(() => av.movers()))
+app.get('/api/market/overview',  ledgerHandler((req) => av.overview(String(req.query.symbol || '').toUpperCase())))
+app.get('/api/market/news',      ledgerHandler((req) => av.news(String(req.query.tickers || ''), String(req.query.topics || ''))))
+// Yahoo Finance (no key required — indices + India data)
+app.get('/api/market/indices',        ledgerHandler(() => yahoo.indices()))
+app.get('/api/market/sentiment',      ledgerHandler(() => yahoo.sentiment()))
+app.get('/api/market/sector-indices', ledgerHandler((req) => yahoo.sectorIndices(String(req.query.region || 'IN'))))
+app.get('/api/market/us-quotes',      ledgerHandler(() => yahoo.usQuotes()))
 
-app.listen(PORT, () => {
-  console.log(`\n[stocker] backend running on http://localhost:${PORT}`)
-  startScheduler()
+// ── Watchlists ────────────────────────────────────────────────────────────────
+app.get('/api/watchlists',                    ledgerHandler((req) => listWatchlists(req.userId)))
+app.post('/api/watchlists',                   ledgerHandler((req) => createWatchlist(req.userId, req.body?.name)))
+app.delete('/api/watchlists/:id',             ledgerHandler((req) => deleteWatchlist(req.userId, req.params.id)))
+app.post('/api/watchlists/:id/items',         ledgerHandler((req) => addItem(req.userId, req.params.id, req.body || {})))
+app.delete('/api/watchlists/:id/items/:symbol', ledgerHandler((req) => removeItem(req.userId, req.params.id, req.params.symbol)))
+app.get('/api/market/yahoo-chart',    ledgerHandler((req) => {
+  const { symbol, interval = '5m', range = '1d' } = req.query
+  if (!symbol) throw Object.assign(new Error('symbol required'), { status: 400 })
+  return yahoo.chart(String(symbol), String(interval), String(range))
+}))
+app.get('/api/market/yahoo-quote',    ledgerHandler((req) => {
+  const { symbol } = req.query
+  if (!symbol) throw Object.assign(new Error('symbol required'), { status: 400 })
+  return yahoo.quote(String(symbol))
+}))
+
+// Full Nifty 50 live quotes — 60 s cache per symbol inside yahoo.quote()
+const N50 = [
+  'RELIANCE','TCS','HDFCBANK','INFY','ICICIBANK','HINDUNILVR','ITC','KOTAKBANK','LT','SBIN',
+  'BHARTIARTL','BAJFINANCE','ASIANPAINT','AXISBANK','MARUTI','HCLTECH','SUNPHARMA','WIPRO',
+  'TITAN','TATAMOTORS','ADANIENT','ADANIPORTS','NTPC','POWERGRID','ULTRACEMCO','TECHM',
+  'TATASTEEL','JSWSTEEL','GRASIM','BAJAJFINSV','HEROMOTOCO','DIVISLAB','DRREDDY','EICHERMOT',
+  'APOLLOHOSP','CIPLA','BPCL','COALINDIA','BRITANNIA','ONGC','M&M','NESTLEIND','HINDALCO',
+  'TATACONSUM','INDUSINDBK','LTIM','BAJAJ-AUTO','SHRIRAMFIN','BEL','SBILIFE',
+]
+app.get('/api/market/nse-quotes', ledgerHandler(() =>
+  Promise.allSettled(N50.map((s) => yahoo.quote(`${s}.NS`).then((q) => ({ ...q, nsSymbol: s }))))
+    .then((rs) => rs.filter((r) => r.status === 'fulfilled').map((r) => r.value)),
+))
+
+// Run DB migrations before accepting traffic.
+Promise.all([ensureBrokerAccountsTable(), ensureWatchlistTables()]).then(() => {
+  app.listen(PORT, () => {
+    console.log(`\n[stocker] backend running on http://localhost:${PORT}`)
+    startScheduler()
+  })
+}).catch((err) => {
+  console.error('[stocker] DB init failed:', err.message)
+  process.exit(1)
 })

@@ -37,7 +37,7 @@ export default function HoldingsTable({ holdings }) {
       <DataTable
         columns={columns}
         rows={rows}
-        onRowClick={(r) => r.securityId && navigate(`/stock/${r.securityId}`)}
+        onRowClick={(r) => navigate(r.securityId ? `/stock/${r.securityId}` : `/stock/sym/${r.symbol}`)}
         csvName="stocker-holdings.csv"
         searchKeys={['symbol', 'name', 'sector']}
         initialSort={{ key: 'currentValue', dir: 'desc' }}

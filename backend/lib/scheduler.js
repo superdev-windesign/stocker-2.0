@@ -1,14 +1,18 @@
-// Scheduled jobs (node-cron). DEPLOY-ONLY: runs only when ENABLE_SCHEDULER=true, so it
-// never starts in the dev sandbox (which can't reach Paytm anyway). Two jobs:
-//   1. market-hours poll -> fetch quotes for symbols with active alerts -> evaluate -> notify
-//   2. end-of-day -> write a portfolio NAV snapshot
-// Locally, the alert path is exercised via POST /api/alerts/evaluate-now instead.
+// Scheduled jobs (node-cron). DEPLOY-ONLY — runs when ENABLE_SCHEDULER=true.
+// Multi-user: iterates all registered users, running alerts + NAV snapshot per-user.
 import cron from 'node-cron'
+import { db } from './paytm.js'
 import { listAlerts, evaluateAlerts } from './alerts.js'
 import { notify } from './notifications.js'
 import * as priceProvider from './providers/priceProvider.paytm.js'
 import { writeSnapshot } from './nav.js'
 import { paytmGet } from './paytm.js'
+
+// All registered user IDs (used to fan jobs out per-user).
+async function allUserIds() {
+  const res = await db.execute(`SELECT id FROM users`)
+  return res.rows.map((r) => r.id)
+}
 
 const num = (...v) => {
   for (const x of v) {
@@ -19,9 +23,8 @@ const num = (...v) => {
   return null
 }
 
-// Sum invested / current value from raw Paytm holdings (server-side, no FIFO needed).
-async function portfolioTotals() {
-  const resp = await paytmGet('/holdings/v1/get-user-holdings-data')
+async function portfolioTotals(userId) {
+  const resp = await paytmGet('/holdings/v1/get-user-holdings-data', {}, userId)
   const rows =
     resp?.data?.results || resp?.results || resp?.data || (Array.isArray(resp) ? resp : []) || []
   let invested = 0
@@ -36,28 +39,29 @@ async function portfolioTotals() {
   return { invested, currentValue, holdingsCount: rows.length }
 }
 
-export async function runAlertPoll() {
-  const active = (await listAlerts()).filter((a) => a.status === 'ACTIVE')
+export async function runAlertPoll(userId) {
+  const active = (await listAlerts(userId)).filter((a) => a.status === 'ACTIVE')
   if (!active.length) return { fired: 0 }
 
   const withSymbol = active.filter((a) => a.symbol && a.securityId)
-  const items = [...new Map(withSymbol.map((a) => [a.symbol, { symbol: a.symbol, securityId: a.securityId, exchange: a.exchange }])).values()]
+  const items = [
+    ...new Map(
+      withSymbol.map((a) => [a.symbol, { symbol: a.symbol, securityId: a.securityId, exchange: a.exchange }]),
+    ).values(),
+  ]
   const priceMap = items.length ? await priceProvider.getQuotes(items) : {}
 
-  // Portfolio-level context only needed if a PORTFOLIO_PNL_PCT alert exists.
   let ctx = {}
   if (active.some((a) => a.type === 'PORTFOLIO_PNL_PCT')) {
     try {
-      const t = await portfolioTotals()
+      const t = await portfolioTotals(userId)
       ctx.portfolioPnlPct = t.invested ? ((t.currentValue - t.invested) / t.invested) * 100 : null
-    } catch {
-      /* ignore */
-    }
+    } catch { /* ignore — user may not have Paytm connected */ }
   }
 
-  const fired = await evaluateAlerts(priceMap, ctx)
+  const fired = await evaluateAlerts(userId, priceMap, ctx)
   for (const f of fired) {
-    await notify(f.alert.channels, {
+    await notify(userId, f.alert.channels, {
       title: f.title,
       body: f.body,
       symbol: f.alert.symbol,
@@ -68,10 +72,10 @@ export async function runAlertPoll() {
   return { fired: fired.length }
 }
 
-export async function runEodSnapshot() {
+export async function runEodSnapshot(userId) {
   try {
-    const t = await portfolioTotals()
-    await writeSnapshot(new Date().toISOString().slice(0, 10), {
+    const t = await portfolioTotals(userId)
+    await writeSnapshot(userId, new Date().toISOString().slice(0, 10), {
       invested: t.invested,
       currentValue: t.currentValue,
       realizedPnl: null,
@@ -79,15 +83,25 @@ export async function runEodSnapshot() {
       holdingsCount: t.holdingsCount,
     })
   } catch (err) {
-    console.error('[stocker] EOD snapshot failed:', err.message)
+    console.error(`[stocker] EOD snapshot failed for user ${userId}:`, err.message)
+  }
+}
+
+// Fan out a job to all users, collecting errors without stopping.
+async function fanOut(jobFn, label) {
+  const ids = await allUserIds()
+  for (const uid of ids) {
+    try {
+      await jobFn(uid)
+    } catch (err) {
+      console.error(`[stocker] ${label} failed for user ${uid}:`, err.message)
+    }
   }
 }
 
 export function startScheduler() {
   if (process.env.ENABLE_SCHEDULER !== 'true') return
-  // Cron runs in the server's timezone. These are broad windows; the jobs no-op when
-  // there's nothing to do, so exact market-hours gating isn't critical.
-  cron.schedule('*/5 * * * 1-5', () => runAlertPoll().catch((e) => console.error('[stocker] poll error:', e.message)))
-  cron.schedule('0 12 * * 1-5', () => runEodSnapshot()) // ~end of IST trading day (UTC ~12:00)
-  console.log('[stocker] scheduler enabled (alert poll + EOD snapshot)')
+  cron.schedule('*/5 * * * 1-5', () => fanOut(runAlertPoll, 'alert-poll').catch((e) => console.error('[stocker] poll error:', e.message)))
+  cron.schedule('0 12 * * 1-5', () => fanOut(runEodSnapshot, 'eod-snapshot'))
+  console.log('[stocker] scheduler enabled (alert poll + EOD snapshot — multi-user)')
 }

@@ -165,9 +165,24 @@ export function normalizeIndmoneyHoldings(apiResponse) {
     .filter((h) => h.quantity > 0)
 }
 
+// ── CSV mode: backend already returns a fully-normalized array + sector enrichment ──
+export function normalizeCsvHoldings(data) {
+  if (!Array.isArray(data)) return []
+  return data.map((h) => {
+    // Add bundled sector/industry/cap for Indian stocks (backend doesn't call enrich())
+    const meta = h.country === 'IN' ? enrich(h.symbol) : { sector: null, industry: null, cap: null }
+    return {
+      ...h,
+      sector: h.sector || meta.sector,
+      industry: h.industry || meta.industry,
+      cap: h.cap || meta.cap,
+    }
+  })
+}
+
 // Dispatch to the right normalizer for the active provider.
 export function normalizeHoldingsFor(provider, apiResponse) {
-  return provider === 'indmoney'
-    ? normalizeIndmoneyHoldings(apiResponse)
-    : normalizeHoldings(apiResponse)
+  if (provider === 'indmoney') return normalizeIndmoneyHoldings(apiResponse)
+  if (provider === 'csv') return normalizeCsvHoldings(apiResponse)
+  return normalizeHoldings(apiResponse)
 }

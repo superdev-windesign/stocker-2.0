@@ -20,6 +20,10 @@ const PROVIDER_PATHS = {
     priceChart: '/api/indmoney/historical',
     // INDstocks has no direct equivalents for these in our read-only use — omitted.
   },
+  // CSV mode: holdings derived from ledger; no broker orders/funds/profile.
+  csv: {
+    holdings: '/api/holdings/derived',
+  },
 }
 
 const pathFor = (provider, key) => (PROVIDER_PATHS[provider] || PROVIDER_PATHS.paytm)[key]

@@ -2,6 +2,8 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts'
 import { marketQuote, marketHistory, marketSearch, marketMovers, marketOverview } from '../services/marketApi'
 import { Card, SectionTitle, StatPill, Skeleton, EmptyState } from '../components/common/ui'
+import IndicesBar from '../components/market/IndicesBar'
+import NewsWidget from '../components/market/NewsWidget'
 
 const fmtNum = (n, d = 2) => (n == null || Number.isNaN(n) ? '—' : Number(n).toLocaleString('en-US', { maximumFractionDigits: d }))
 const fmtCompact = (n) => {
@@ -110,7 +112,7 @@ function Movers() {
         right={
           <div className="inline-flex rounded-lg border border-slate-200 p-0.5 dark:border-white/10">
             {[['gainers', 'Gainers'], ['losers', 'Losers'], ['active', 'Active']].map(([v, l]) => (
-              <button key={v} onClick={() => setTab(v)} className={`rounded-md px-2.5 py-1 text-xs font-medium ${tab === v ? 'bg-indigo-600 text-white' : 'text-slate-500 dark:text-slate-400'}`}>{l}</button>
+              <button key={v} onClick={() => setTab(v)} className={`rounded-md px-2.5 py-1 text-xs font-medium transition ${tab === v ? 'bg-indigo-600 text-white' : 'text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-100'}`}>{l}</button>
             ))}
           </div>
         }
@@ -161,7 +163,10 @@ export default function Markets() {
 
   return (
     <div className="space-y-6">
-      <SectionTitle title="Markets" subtitle="Search any stock · quotes, history & fundamentals · live movers (AlphaVantage)" />
+      <SectionTitle title="Markets" subtitle="Live indices · quotes · movers · news" />
+
+      {/* Indices + sentiment bar — auto-refreshes every 30 s */}
+      <IndicesBar />
 
       <Card className="p-4">
         <input
@@ -194,8 +199,11 @@ export default function Markets() {
 
       <Movers />
 
+      {/* News feed — general market news (no ticker filter) */}
+      <NewsWidget />
+
       <p className="text-xs text-slate-400">
-        Powered by AlphaVantage. Free-tier data is rate-limited and cached; if you see a limit message, try again shortly.
+        Indices via Yahoo Finance · Quotes, movers &amp; news via AlphaVantage. Free-tier data is rate-limited and cached; try again shortly if you see a limit message.
       </p>
     </div>
   )

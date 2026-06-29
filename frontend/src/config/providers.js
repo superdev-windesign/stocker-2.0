@@ -35,6 +35,14 @@ export const PROVIDERS = {
     available: true,
     auth: 'explore', // no account — enters market-data explore mode
   },
+  csv: {
+    id: 'csv',
+    name: 'Upload CSV',
+    markets: 'Any broker — Zerodha · Paytm · Groww · Upstox',
+    flag: '📂',
+    available: true,
+    auth: 'csv', // no broker token; holdings derived from uploaded tradebook
+  },
 }
 
 export const PROVIDER_LIST = Object.values(PROVIDERS)

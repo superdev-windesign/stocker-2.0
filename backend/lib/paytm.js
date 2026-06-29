@@ -1,31 +1,34 @@
 // Shared Paytm + Turso logic for the Stocker Express backend.
 // broker_accounts table replaces the legacy single-row sessions table so each user
 // can connect their own Paytm account.
+// Phase 3: broker tokens are AES-256-GCM encrypted at rest via crypto.js.
 
 import { createClient } from '@libsql/client'
+import { encryptJson, decryptJson, isEncrypted } from './crypto.js'
 
-const API_KEY = process.env.PAYTM_API_KEY || process.env.VITE_PAYTM_API_KEY
+const API_KEY    = process.env.PAYTM_API_KEY    || process.env.VITE_PAYTM_API_KEY
 const API_SECRET = process.env.PAYTM_API_SECRET || process.env.VITE_PAYTM_API_SECRET
 
 export const LOGIN_URL = 'https://login.paytmmoney.com/merchant-login?apiKey='
 const GETTOKEN_URL = 'https://developer.paytmmoney.com/accounts/v2/gettoken'
-const PAYTM_HOST = 'https://developer.paytmmoney.com'
+const PAYTM_HOST   = 'https://developer.paytmmoney.com'
 
 export const apiKey = API_KEY
 
 const db = createClient({
-  url: process.env.TURSO_URL,
+  url:       process.env.TURSO_URL,
   authToken: process.env.TURSO_AUTH_TOKEN,
 })
 
 export { db }
 
-// ── broker_accounts table (replaces the legacy single-row sessions table) ────
+// ── broker_accounts table ─────────────────────────────────────────────────────
+// Phase 3 migration: rename token_data → token_enc if the old column still exists.
 let baReady = false
-async function ensureBrokerAccountsTable() {
+export async function ensureBrokerAccountsTable() {
   if (baReady) return
-  // Keep the legacy sessions table so existing single-user data isn't broken while
-  // we migrate. broker_accounts is the multi-user successor.
+
+  // Legacy sessions table (kept for backward compat during migration).
   await db.execute(`
     CREATE TABLE IF NOT EXISTS sessions (
       id       INTEGER PRIMARY KEY CHECK (id = 1),
@@ -33,18 +36,55 @@ async function ensureBrokerAccountsTable() {
       saved_at TEXT NOT NULL
     )
   `)
+
+  // Create broker_accounts with token_enc if it doesn't exist yet.
   await db.execute(`
     CREATE TABLE IF NOT EXISTS broker_accounts (
-      id         TEXT PRIMARY KEY,
-      user_id    TEXT NOT NULL,
-      provider   TEXT NOT NULL,
-      token_data TEXT NOT NULL,
-      status     TEXT NOT NULL DEFAULT 'active',
-      saved_at   TEXT NOT NULL,
+      id        TEXT PRIMARY KEY,
+      user_id   TEXT NOT NULL,
+      provider  TEXT NOT NULL,
+      token_enc TEXT NOT NULL,
+      status    TEXT NOT NULL DEFAULT 'active',
+      saved_at  TEXT NOT NULL,
       UNIQUE(user_id, provider)
     )
   `)
+
+  // If the table was created before Phase 3, it has token_data. Rename it.
+  const info = await db.execute(`PRAGMA table_info(broker_accounts)`)
+  const cols = info.rows.map((r) => r.name)
+  if (cols.includes('token_data') && !cols.includes('token_enc')) {
+    await db.execute(`ALTER TABLE broker_accounts RENAME COLUMN token_data TO token_enc`)
+    console.log('[stocker] migrated broker_accounts: token_data → token_enc')
+  }
+
   baReady = true
+
+  // Re-encrypt any existing plaintext rows (only runs if TOKEN_ENCRYPTION_KEY is set).
+  await _reEncryptAllPlaintext()
+}
+
+async function _reEncryptAllPlaintext() {
+  const { isEncrypted: enc, encryptJson: ejson } = await import('./crypto.js')
+  const key = process.env.TOKEN_ENCRYPTION_KEY
+  if (!key) return  // no key → nothing to encrypt
+
+  const rows = await db.execute(`SELECT id, token_enc FROM broker_accounts`)
+  for (const r of rows.rows) {
+    if (!enc(r.token_enc)) {
+      try {
+        const plain = r.token_enc
+        const parsed = JSON.parse(plain)
+        await db.execute({
+          sql:  `UPDATE broker_accounts SET token_enc = ? WHERE id = ?`,
+          args: [ejson(parsed), r.id],
+        })
+        console.log(`[stocker] re-encrypted plaintext token row ${r.id}`)
+      } catch (err) {
+        console.warn(`[stocker] failed to re-encrypt row ${r.id}:`, err.message)
+      }
+    }
+  }
 }
 
 // Decode the `exp` (UNIX seconds) from a JWT without verifying the signature.
@@ -68,15 +108,21 @@ export function isValid(t) {
 export async function getTokens(userId) {
   await ensureBrokerAccountsTable()
   const res = await db.execute({
-    sql: `SELECT token_data FROM broker_accounts WHERE user_id = ? AND provider = 'paytm'`,
+    sql:  `SELECT token_enc FROM broker_accounts WHERE user_id = ? AND provider = 'paytm'`,
     args: [userId],
   })
   if (!res.rows.length) return null
-  try {
-    return JSON.parse(res.rows[0].token_data)
-  } catch {
-    return null
+
+  const stored = res.rows[0].token_enc
+  const tokens = decryptJson(stored)
+  if (!tokens) return null
+
+  // Lazy re-encryption: if the stored value was plaintext, encrypt it now.
+  if (!isEncrypted(stored)) {
+    await _reEncrypt(userId, 'paytm', tokens)
   }
+
+  return tokens
 }
 
 export async function getValidTokens(userId) {
@@ -93,20 +139,20 @@ export async function saveTokens(userId, tokens) {
   await ensureBrokerAccountsTable()
   const { randomUUID } = await import('node:crypto')
   await db.execute({
-    sql: `INSERT INTO broker_accounts (id, user_id, provider, token_data, status, saved_at)
+    sql: `INSERT INTO broker_accounts (id, user_id, provider, token_enc, status, saved_at)
           VALUES (?, ?, 'paytm', ?, 'active', ?)
           ON CONFLICT(user_id, provider) DO UPDATE SET
-            token_data = excluded.token_data,
-            status     = 'active',
-            saved_at   = excluded.saved_at`,
-    args: [randomUUID(), userId, JSON.stringify(tokens), new Date().toISOString()],
+            token_enc = excluded.token_enc,
+            status    = 'active',
+            saved_at  = excluded.saved_at`,
+    args: [randomUUID(), userId, encryptJson(tokens), new Date().toISOString()],
   })
 }
 
 export async function clearTokens(userId) {
   await ensureBrokerAccountsTable()
   await db.execute({
-    sql: `DELETE FROM broker_accounts WHERE user_id = ? AND provider = 'paytm'`,
+    sql:  `DELETE FROM broker_accounts WHERE user_id = ? AND provider = 'paytm'`,
     args: [userId],
   })
 }
@@ -118,13 +164,9 @@ export async function exchangeRequestToken(requestToken, userId) {
     throw e
   }
   const resp = await fetch(GETTOKEN_URL, {
-    method: 'POST',
+    method:  'POST',
     headers: { 'Content-Type': 'application/json', 'openapi-client-src': 'sdk' },
-    body: JSON.stringify({
-      api_key: API_KEY,
-      api_secret_key: API_SECRET,
-      request_token: requestToken,
-    }),
+    body:    JSON.stringify({ api_key: API_KEY, api_secret_key: API_SECRET, request_token: requestToken }),
   })
   const text = await resp.text()
   if (!resp.ok) {
@@ -144,22 +186,18 @@ export async function paytmGet(path, query = {}, userId) {
     e.status = 401
     throw e
   }
-  const qs = new URLSearchParams(query).toString()
+  const qs  = new URLSearchParams(query).toString()
   const url = `${PAYTM_HOST}${path}${qs ? `?${qs}` : ''}`
   const resp = await fetch(url, {
     headers: {
-      'Content-Type': 'application/json',
+      'Content-Type':      'application/json',
       'openapi-client-src': 'sdk',
-      'x-jwt-token': tokens.access_token,
+      'x-jwt-token':        tokens.access_token,
     },
   })
   const text = await resp.text()
   let body
-  try {
-    body = JSON.parse(text)
-  } catch {
-    body = text
-  }
+  try { body = JSON.parse(text) } catch { body = text }
   if (!resp.ok) {
     const e = new Error(typeof body === 'string' ? body : JSON.stringify(body))
     e.status = resp.status
@@ -168,9 +206,19 @@ export async function paytmGet(path, query = {}, userId) {
   return body
 }
 
-// Convenience: get the public_access_token for a user (used by the frontend
-// WebSocket connection and the token-status endpoint).
 export async function getPublicToken(userId) {
   const t = await getValidTokens(userId)
   return t?.public_access_token || null
+}
+
+// Internal: write back an encrypted copy of an already-decoded token object.
+async function _reEncrypt(userId, provider, tokenObj) {
+  try {
+    await db.execute({
+      sql:  `UPDATE broker_accounts SET token_enc = ? WHERE user_id = ? AND provider = ?`,
+      args: [encryptJson(tokenObj), userId, provider],
+    })
+  } catch (err) {
+    console.warn(`[stocker] re-encrypt failed for ${provider}/${userId}:`, err.message)
+  }
 }
