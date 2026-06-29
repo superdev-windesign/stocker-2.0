@@ -16,7 +16,7 @@ function MoverList({ title, subtitle, rows, navigate, empty }) {
           {rows.map((j) => (
             <li
               key={j.symbol}
-              onClick={() => j.securityId && navigate(`/stock/${j.securityId}`)}
+              onClick={() => navigate(j.securityId ? `/stock/${j.securityId}` : `/stock/sym/${encodeURIComponent(j.symbol)}`)}
               className="flex cursor-pointer items-center justify-between rounded-lg px-2 py-1.5 hover:bg-slate-50 dark:hover:bg-white/5"
             >
               <div className="min-w-0">
@@ -40,8 +40,9 @@ function MoverList({ title, subtitle, rows, navigate, empty }) {
 }
 
 // Lifetime top profit / top loss across the whole ledger (F12).
-export default function TopMovers() {
-  const { journeys } = usePortfolio()
+export default function TopMovers({ journeys: journeysProp }) {
+  const { journeys: journeysCtx } = usePortfolio()
+  const journeys = journeysProp ?? journeysCtx
   const navigate = useNavigate()
   const winners = useMemo(() => topProfit(journeys || [], 5), [journeys])
   const losers = useMemo(() => topLoss(journeys || [], 5), [journeys])

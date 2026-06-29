@@ -40,6 +40,8 @@ import authRouter from './routes/auth.js'
 import { authMiddleware } from './middleware/authMiddleware.js'
 import { ensureBrokerAccountsTable } from './lib/paytm.js'
 import { getDerivedHoldings } from './lib/holdings.js'
+import { getPortfolioHistory } from './lib/portfolioHistory.js'
+import { getPortfolioNews } from './lib/portfolioNews.js'
 import { listWatchlists, createWatchlist, deleteWatchlist, addItem, removeItem, ensureWatchlistTables } from './lib/watchlists.js'
 
 const PORT = Number(process.env.PORT || 5174)
@@ -203,6 +205,8 @@ app.delete('/api/transactions/source/:source',ledgerHandler((req) => clearTransa
 app.delete('/api/transactions',               ledgerHandler(async (req) => { await clearTransactions(req.userId); return { ok: true } }))
 
 app.get('/api/nav', ledgerHandler((req) => listSnapshots(req.userId)))
+app.get('/api/portfolio/history', ledgerHandler((req) => getPortfolioHistory(req.userId, String(req.query.range || '1y'), req.query.country || null)))
+app.get('/api/portfolio/news', ledgerHandler((req) => getPortfolioNews(req.userId, req.query.country || null)))
 
 // ── INDmoney / INDstocks provider ─────────────────────────────────────────────
 const indmoneyHandler = (fn) => async (req, res) => {

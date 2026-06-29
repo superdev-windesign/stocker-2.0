@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
+import { usePortfolio } from '../context/PortfolioContext'
 import { importTransactionsApi } from '../services/ledgerApi'
 import { parseTradebookFile } from '../analytics/tradebook'
 import { PROVIDER_LIST } from '../config/providers'
@@ -350,6 +351,7 @@ function CsvUploadCard({ onActivated }) {
 // ── Main page ──────────────────────────────────────────────────────────────────
 export default function BrokerConnect() {
   const { setToken, setProvider } = useAuth()
+  const { reload } = usePortfolio()
   const navigate = useNavigate()
   const [statuses, setStatuses] = useState({})
   const [pasteToken, setPasteToken] = useState('')
@@ -484,7 +486,7 @@ export default function BrokerConnect() {
           Groww → Profit &amp; Loss, Upstox → Downloads) and upload it here. Your portfolio, P&amp;L, and analytics
           will be built from the file — live prices come from Yahoo Finance.
         </p>
-        <CsvUploadCard onActivated={() => navigate('/')} />
+        <CsvUploadCard onActivated={() => { reload(); navigate('/') }} />
       </div>
 
       {/* Paste token modal for INDstocks */}

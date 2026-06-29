@@ -8,6 +8,8 @@ import { ThemeToggle } from './components/common/ui'
 import ErrorBoundary from './components/ErrorBoundary'
 import NotificationBell from './components/NotificationBell'
 import ProfileMenu from './components/ProfileMenu'
+import MarketStatus from './components/MarketStatus'
+import CopilotDrawer from './components/CopilotDrawer'
 import Login from './routes/Login'
 import BrokerConnect from './routes/BrokerConnect'
 import PortfolioDashboard from './routes/PortfolioDashboard'
@@ -88,6 +90,7 @@ function Layout({ children }) {
 
           {/* Right cluster */}
           <div className="ml-auto flex items-center gap-2 lg:ml-0">
+            <MarketStatus />
             <ThemeToggle />
             <NotificationBell />
             <ProfileMenu />
@@ -120,6 +123,7 @@ function Layout({ children }) {
       <main className="mx-auto max-w-7xl px-4 py-6">
         <ErrorBoundary key={location.pathname}>{children}</ErrorBoundary>
       </main>
+      <CopilotDrawer />
     </div>
   )
 }

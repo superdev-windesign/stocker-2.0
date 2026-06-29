@@ -2,11 +2,11 @@ import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts'
 import { Card, SectionTitle } from '../common/ui'
 import { allocationBy, topHoldings, diversificationScore } from '../../analytics/portfolioMetrics'
 import { sectorColor } from '../../data/sectors'
-import { inrCompact, inr } from '../../analytics/format'
+import { money, moneyCompact } from '../../analytics/format'
 
 const CAP_COLORS = { Large: '#6366f1', Mid: '#06b6d4', Small: '#f59e0b', Unknown: '#64748b' }
 
-function AllocPie({ title, data, colorFn }) {
+function AllocPie({ title, data, colorFn, currency }) {
   return (
     <Card className="p-4">
       <SectionTitle title={title} />
@@ -19,7 +19,7 @@ function AllocPie({ title, data, colorFn }) {
               ))}
             </Pie>
             <Tooltip
-              formatter={(v, n) => [`₹${inr(v)}`, n]}
+              formatter={(v, n) => [money(v, currency), n]}
               contentStyle={{ background: '#12161c', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, color: '#eaecef' }}
             />
           </PieChart>
@@ -41,6 +41,7 @@ function AllocPie({ title, data, colorFn }) {
 }
 
 export default function AllocationCharts({ holdings }) {
+  const currency = holdings.find((h) => h.currency)?.currency || 'INR'
   const bySector = allocationBy(holdings, 'sector')
   const byCap = allocationBy(holdings, 'cap')
   const top = topHoldings(holdings, 5)
@@ -48,8 +49,8 @@ export default function AllocationCharts({ holdings }) {
 
   return (
     <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-4">
-      <AllocPie title="Sector Allocation" data={bySector} colorFn={sectorColor} />
-      <AllocPie title="Market Cap" data={byCap} colorFn={(n) => CAP_COLORS[n] || '#64748b'} />
+      <AllocPie title="Sector Allocation" data={bySector} colorFn={sectorColor} currency={currency} />
+      <AllocPie title="Market Cap" data={byCap} colorFn={(n) => CAP_COLORS[n] || '#64748b'} currency={currency} />
 
       <Card className="p-4">
         <SectionTitle title="Top Holdings" />

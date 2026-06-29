@@ -31,6 +31,10 @@ export const marketChart     = (symbol, interval = '5m', range = '1d') =>
 export const marketYahooQuote = (symbol) => get('/api/market/yahoo-quote', { symbol })
 // Yahoo fundamentals — market cap, P/E, EPS, dividend yield, beta, sector.
 export const marketFundamentals = (symbol) => get('/api/market/fundamentals', { symbol })
+// Reconstructed portfolio equity curve (value + invested per day) from the ledger.
+export const portfolioHistory = (range = '1y', country) => get('/api/portfolio/history', country ? { range, country } : { range })
+// Portfolio-aware news: merged headlines for your holdings, tagged + sentiment-scored.
+export const portfolioNews = (country) => get('/api/portfolio/news', country ? { country } : undefined)
 // News stories related to a symbol/name (Yahoo) + Wikipedia profile summary.
 export const marketStockNews  = (q) => get('/api/market/stock-news', { q })
 export const marketProfile    = (q) => get('/api/market/profile', { q })
