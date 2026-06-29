@@ -28,12 +28,13 @@ async function av(params) {
   const j = await resp.json().catch(() => ({}))
   // AlphaVantage signals rate-limit / errors in the body, not the HTTP status.
   if (j.Note || j.Information) {
-    const e = new Error(j.Note || j.Information)
+    // Never forward the raw AV message — it contains the API key.
+    const e = new Error('AlphaVantage rate limit reached (25 req/day on free tier). Try again tomorrow or upgrade at alphavantage.co/premium.')
     e.status = 429
     throw e
   }
   if (j['Error Message']) {
-    const e = new Error(j['Error Message'])
+    const e = new Error('AlphaVantage: invalid symbol or request.')
     e.status = 400
     throw e
   }
