@@ -1,5 +1,6 @@
+import { randomUUID } from 'node:crypto'
 import { Router } from 'express'
-import { createUser, findByEmail, findById } from '../lib/users.js'
+import { createUser, findByEmail, findById, storeResetToken, findByResetToken, updatePassword } from '../lib/users.js'
 import { hashPassword, checkPassword, signToken, setCookie, clearCookie } from '../lib/auth.js'
 import { authMiddleware } from '../middleware/authMiddleware.js'
 import { db } from '../lib/paytm.js'
@@ -83,6 +84,45 @@ router.post('/claim-legacy', authMiddleware, async (req, res) => {
   } catch (err) {
     console.error('[auth] claim-legacy error:', err)
     res.status(500).json({ error: err.message })
+  }
+})
+
+// POST /auth/forgot-password — generate a reset token and return the reset URL.
+// No email service configured, so the URL is returned directly for the UI to display.
+router.post('/forgot-password', async (req, res) => {
+  try {
+    const { email } = req.body || {}
+    if (!email) return res.status(400).json({ error: 'email is required' })
+    const user = await findByEmail(email)
+    // Always return 200 to avoid leaking which emails are registered
+    if (!user) return res.json({ ok: true })
+    const token = randomUUID()
+    await storeResetToken(user.id, token)
+    const origin = req.headers.origin || `http://localhost:5173`
+    res.json({ ok: true, resetUrl: `${origin}/login?token=${token}` })
+  } catch (err) {
+    console.error('[auth] forgot-password error:', err)
+    res.status(500).json({ error: 'Request failed' })
+  }
+})
+
+// POST /auth/reset-password — validate reset token and set new password.
+router.post('/reset-password', async (req, res) => {
+  try {
+    const { token, password } = req.body || {}
+    if (!token || !password) return res.status(400).json({ error: 'token and password are required' })
+    if (password.length < 8) return res.status(400).json({ error: 'password must be at least 8 characters' })
+    const user = await findByResetToken(token)
+    if (!user) return res.status(400).json({ error: 'Invalid or expired reset link' })
+    if (user.reset_expires && new Date(user.reset_expires) < new Date()) {
+      return res.status(400).json({ error: 'Reset link has expired. Please request a new one.' })
+    }
+    const passwordHash = await hashPassword(password)
+    await updatePassword(user.id, passwordHash)
+    res.json({ ok: true })
+  } catch (err) {
+    console.error('[auth] reset-password error:', err)
+    res.status(500).json({ error: 'Reset failed' })
   }
 })
 
