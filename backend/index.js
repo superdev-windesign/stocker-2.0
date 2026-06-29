@@ -34,6 +34,8 @@ import { generateInsight } from './lib/insights.js'
 import { runAgent } from './lib/agent.js'
 import * as av from './lib/marketdata/alphavantage.js'
 import * as yahoo from './lib/marketdata/yahoo.js'
+import * as wiki from './lib/marketdata/wiki.js'
+import * as gnews from './lib/marketdata/news.js'
 import authRouter from './routes/auth.js'
 import { authMiddleware } from './middleware/authMiddleware.js'
 import { ensureBrokerAccountsTable } from './lib/paytm.js'
@@ -275,6 +277,16 @@ app.get('/api/market/yahoo-quote',    ledgerHandler((req) => {
   const { symbol } = req.query
   if (!symbol) throw Object.assign(new Error('symbol required'), { status: 400 })
   return yahoo.quote(String(symbol))
+}))
+app.get('/api/market/stock-news',     ledgerHandler((req) => {
+  const { q } = req.query
+  if (!q) throw Object.assign(new Error('q required'), { status: 400 })
+  return gnews.search(String(q))
+}))
+app.get('/api/market/profile',        ledgerHandler((req) => {
+  const { q } = req.query
+  if (!q) throw Object.assign(new Error('q required'), { status: 400 })
+  return wiki.summary(String(q))
 }))
 
 // Full Nifty 50 live quotes — 60 s cache per symbol inside yahoo.quote()

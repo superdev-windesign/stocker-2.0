@@ -201,6 +201,38 @@ export const chart = (symbol, interval = '5m', range = '1d') => {
   })
 }
 
+// ── Stock/index news via Yahoo search ─────────────────────────────────────────
+async function doSearch(query, crumbState) {
+  const url = `${CHART_BASE}/v1/finance/search?q=${encodeURIComponent(query)}&newsCount=12&quotesCount=0&crumb=${encodeURIComponent(crumbState.crumb)}`
+  const resp = await fetch(url, { headers: { ...HEADERS, Cookie: crumbState.cookie } })
+  if (resp.status === 401 || resp.status === 403) {
+    const e = new Error(`Yahoo search auth ${resp.status}`); e.status = resp.status; throw e
+  }
+  const j = await resp.json()
+  return (j?.news || [])
+    .filter((n) => n.title && n.link)
+    .map((n) => ({
+      title: n.title,
+      publisher: n.publisher || 'News',
+      link: n.link,
+      publishedAt: n.providerPublishTime ? n.providerPublishTime * 1000 : null,
+      thumbnail: n.thumbnail?.resolutions?.slice(-1)?.[0]?.url || null,
+    }))
+}
+
+export const news = (query) =>
+  memo(`ynews:${query}`, 5 * 60_000, async () => {
+    let state = await getCrumb()
+    try { return await doSearch(query, state) }
+    catch (err) {
+      if (err.status === 401 || err.status === 403) {
+        state = await getCrumb(true)
+        return await doSearch(query, state)
+      }
+      throw err
+    }
+  })
+
 // ── Nifty sector indices ──────────────────────────────────────────────────────
 const SECTOR_SYMS = [
   '^CNXAUTO', '^CNXFIN', '^CNXFMCG', '^CNXINFRA',

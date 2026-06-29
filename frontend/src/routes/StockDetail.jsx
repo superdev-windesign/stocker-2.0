@@ -8,6 +8,7 @@ import { Card, SectionTitle, Timeframe, Skeleton, EmptyState } from '../componen
 import MarketAreaChart from '../components/market/MarketAreaChart'
 import AddToListButton from '../components/market/AddToListButton'
 import { RelatedAssets, DiscoverMore } from '../components/market/DiscoverSections'
+import { StockNews, StockProfile } from '../components/market/StockInfoSections'
 import PositionSummary from '../components/stock/PositionSummary'
 import PriceChartWithMarkers from '../components/stock/PriceChartWithMarkers'
 import BuySellTimeline from '../components/stock/BuySellTimeline'
@@ -121,6 +122,10 @@ export default function StockDetail() {
   const cur = country === 'IN' ? '₹' : '$'
   const useBrokerChart = holding?.securityId && brokerCandles.length > 0
 
+  // Queries for news + Wikipedia profile — both use the human-readable name (Google News / Wikipedia).
+  const newsQuery = subject?.name || (isIndex ? '' : bareSym)
+  const profileQuery = subject?.name || (isIndex ? '' : bareSym)
+
   // Navigate to a related/discover item (index or stock)
   const openItem = (it) => {
     if (it.type === 'index') navigate(`/stock/sym/${encodeURIComponent(it.symbol)}?type=index&mkt=${country}`)
@@ -217,8 +222,15 @@ export default function StockDetail() {
       {journey && <StockTradebook transactions={journey.transactions} currency={journey.currency} />}
       {journey?.transactions?.length > 0 && <BuySellTimeline transactions={journey.transactions} />}
 
+      {/* News stories related to this stock/index (Yahoo) */}
+      {newsQuery && <StockNews query={newsQuery} />}
+
+      {/* Profile — company/index description from Wikipedia */}
+      {profileQuery && <StockProfile query={profileQuery} />}
+
       {/* Discover more — You may be interested in / People also search for */}
-      <DiscoverMore country={country} currentSymbol={isIndex ? bareSym : bareSym} onOpen={openItem} />
+      {/* Temporarily hidden — re-enable when ready */}
+      {/* <DiscoverMore country={country} currentSymbol={isIndex ? bareSym : bareSym} onOpen={openItem} /> */}
 
       <p className="pb-4 text-center text-xs text-slate-400">
         Live data via Yahoo Finance · for informational purposes only.
