@@ -29,6 +29,8 @@ export const marketChart     = (symbol, interval = '5m', range = '1d') =>
   get('/api/market/yahoo-chart', { symbol, interval, range })
 // Yahoo single quote — price, prevClose, open/high/low, 52-wk, volume (any symbol w/ .NS/.BO suffix).
 export const marketYahooQuote = (symbol) => get('/api/market/yahoo-quote', { symbol })
+// Yahoo fundamentals — market cap, P/E, EPS, dividend yield, beta, sector.
+export const marketFundamentals = (symbol) => get('/api/market/fundamentals', { symbol })
 // News stories related to a symbol/name (Yahoo) + Wikipedia profile summary.
 export const marketStockNews  = (q) => get('/api/market/stock-news', { q })
 export const marketProfile    = (q) => get('/api/market/profile', { q })

@@ -201,6 +201,46 @@ export const chart = (symbol, interval = '5m', range = '1d') => {
   })
 }
 
+// ── Fundamentals via Yahoo quoteSummary (market cap, P/E, EPS, div yield, beta) ──
+async function doQuoteSummary(symbol, crumbState) {
+  const modules = 'summaryDetail,defaultKeyStatistics,assetProfile,price'
+  const url = `${CHART_BASE}/v10/finance/quoteSummary/${encodeURIComponent(symbol)}?modules=${modules}&crumb=${encodeURIComponent(crumbState.crumb)}`
+  const resp = await fetch(url, { headers: { ...HEADERS, Cookie: crumbState.cookie } })
+  if (resp.status === 401 || resp.status === 403) {
+    const e = new Error(`Yahoo quoteSummary auth ${resp.status}`); e.status = resp.status; throw e
+  }
+  const j = await resp.json()
+  const r = j?.quoteSummary?.result?.[0]
+  if (!r) throw new Error(`No fundamentals for ${symbol}`)
+  const sd = r.summaryDetail || {}, ks = r.defaultKeyStatistics || {}, ap = r.assetProfile || {}, pr = r.price || {}
+  const raw = (o) => (o && typeof o === 'object' ? (o.raw ?? null) : (o ?? null))
+  return {
+    marketCap:     raw(sd.marketCap) ?? raw(pr.marketCap),
+    peRatio:       raw(sd.trailingPE) ?? raw(ks.forwardPE),
+    forwardPE:     raw(ks.forwardPE),
+    eps:           raw(ks.trailingEps),
+    dividendYield: raw(sd.dividendYield),   // fraction (0.012 = 1.2%)
+    beta:          raw(sd.beta) ?? raw(ks.beta),
+    priceToBook:   raw(ks.priceToBook),
+    sector:        ap.sector ?? null,
+    industry:      ap.industry ?? null,
+    currency:      pr.currency ?? sd.currency ?? null,
+  }
+}
+
+export const fundamentals = (symbol) =>
+  memo(`yfund:${symbol}`, 3600_000, async () => {
+    let state = await getCrumb()
+    try { return await doQuoteSummary(symbol, state) }
+    catch (err) {
+      if (err.status === 401 || err.status === 403) {
+        state = await getCrumb(true)
+        return await doQuoteSummary(symbol, state)
+      }
+      throw err
+    }
+  })
+
 // ── Stock/index news via Yahoo search ─────────────────────────────────────────
 async function doSearch(query, crumbState) {
   const url = `${CHART_BASE}/v1/finance/search?q=${encodeURIComponent(query)}&newsCount=12&quotesCount=0&crumb=${encodeURIComponent(crumbState.crumb)}`

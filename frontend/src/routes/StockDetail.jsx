@@ -8,7 +8,7 @@ import { Card, SectionTitle, Timeframe, Skeleton, EmptyState } from '../componen
 import MarketAreaChart from '../components/market/MarketAreaChart'
 import AddToListButton from '../components/market/AddToListButton'
 import { RelatedAssets, DiscoverMore } from '../components/market/DiscoverSections'
-import { StockNews, StockProfile } from '../components/market/StockInfoSections'
+import { KeyStats, StockNews, StockProfile } from '../components/market/StockInfoSections'
 import PositionSummary from '../components/stock/PositionSummary'
 import PriceChartWithMarkers from '../components/stock/PriceChartWithMarkers'
 import BuySellTimeline from '../components/stock/BuySellTimeline'
@@ -199,6 +199,9 @@ export default function StockDetail() {
           {mq.currency && <StatBox label="Currency" value={mq.currency} />}
         </div>
       )}
+
+      {/* Key stats / fundamentals (stocks only — indices have no P/E etc.) */}
+      {!isIndex && yahooSym && <KeyStats symbol={yahooSym} currency={cur} />}
 
       {/* Related assets (major indices for this market) */}
       <RelatedAssets country={country} currentSymbol={isIndex ? bareSym : null} onOpen={openItem} />

@@ -278,6 +278,11 @@ app.get('/api/market/yahoo-quote',    ledgerHandler((req) => {
   if (!symbol) throw Object.assign(new Error('symbol required'), { status: 400 })
   return yahoo.quote(String(symbol))
 }))
+app.get('/api/market/fundamentals',   ledgerHandler((req) => {
+  const { symbol } = req.query
+  if (!symbol) throw Object.assign(new Error('symbol required'), { status: 400 })
+  return yahoo.fundamentals(String(symbol))
+}))
 app.get('/api/market/stock-news',     ledgerHandler((req) => {
   const { q } = req.query
   if (!q) throw Object.assign(new Error('q required'), { status: 400 })

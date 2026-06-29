@@ -1,6 +1,70 @@
-// "News stories" + "Profile" sections for the stock detail page.
+// "Key stats" + "News stories" + "Profile" sections for the stock detail page.
 import { useEffect, useState } from 'react'
-import { marketStockNews, marketProfile } from '../../services/marketApi'
+import { marketStockNews, marketProfile, marketFundamentals } from '../../services/marketApi'
+
+// Compact market-cap formatter (₹ uses crore/lakh-crore; $ uses T/B/M).
+function fmtCap(v, cur) {
+  if (v == null) return '—'
+  if (cur === '₹') {
+    const cr = v / 1e7
+    if (cr >= 1e5) return `₹${(cr / 1e5).toFixed(2)} L Cr`
+    if (cr >= 1) return `₹${cr.toLocaleString('en-IN', { maximumFractionDigits: 0 })} Cr`
+    return `₹${v.toLocaleString('en-IN')}`
+  }
+  if (v >= 1e12) return `$${(v / 1e12).toFixed(2)}T`
+  if (v >= 1e9) return `$${(v / 1e9).toFixed(2)}B`
+  if (v >= 1e6) return `$${(v / 1e6).toFixed(2)}M`
+  return `$${v.toLocaleString('en-US')}`
+}
+
+function Stat({ label, value }) {
+  return (
+    <div className="rounded-lg border border-slate-200 p-3 dark:border-white/10">
+      <p className="text-[11px] text-slate-500 dark:text-slate-400">{label}</p>
+      <p className="mt-0.5 truncate text-sm font-semibold tabular-nums text-slate-900 dark:text-slate-100">{value}</p>
+    </div>
+  )
+}
+
+export function KeyStats({ symbol, currency = '₹' }) {
+  const [f, setF] = useState(undefined) // undefined=loading, null=unavailable
+  useEffect(() => {
+    if (!symbol) return
+    let off = false
+    setF(undefined)
+    marketFundamentals(symbol).then((d) => { if (!off) setF(d || null) }).catch(() => { if (!off) setF(null) })
+    return () => { off = true }
+  }, [symbol])
+
+  // Hide entirely if we couldn't load any fundamentals
+  if (f === null) return null
+  const hasAny = f && (f.marketCap != null || f.peRatio != null || f.eps != null || f.beta != null)
+  if (f && !hasAny) return null
+
+  const stats = f ? [
+    ['Market cap', fmtCap(f.marketCap, currency)],
+    ['P/E ratio', f.peRatio != null ? f.peRatio.toFixed(2) : '—'],
+    ['EPS', f.eps != null ? `${currency}${f.eps.toFixed(2)}` : '—'],
+    ['Div yield', f.dividendYield != null ? `${(f.dividendYield * 100).toFixed(2)}%` : '—'],
+    ['Beta', f.beta != null ? f.beta.toFixed(2) : '—'],
+    ['Sector', f.sector || '—'],
+  ] : []
+
+  return (
+    <section>
+      <h2 className="mb-3 text-lg font-bold text-slate-900 dark:text-slate-100">Key stats</h2>
+      {f === undefined ? (
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+          {Array.from({ length: 6 }).map((_, i) => <div key={i} className="h-14 animate-pulse rounded-lg bg-slate-100 dark:bg-white/5" />)}
+        </div>
+      ) : (
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+          {stats.map(([k, v]) => <Stat key={k} label={k} value={v} />)}
+        </div>
+      )}
+    </section>
+  )
+}
 
 function timeAgo(ms) {
   if (!ms) return ''

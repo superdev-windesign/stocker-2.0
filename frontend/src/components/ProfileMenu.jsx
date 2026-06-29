@@ -3,7 +3,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
-import { useTheme } from '../context/ThemeContext'
 
 function Row({ icon, label, value, onClick, danger }) {
   return (
@@ -22,7 +21,6 @@ function Row({ icon, label, value, onClick, danger }) {
 
 export default function ProfileMenu() {
   const { user, token, logout, demo, setDemo } = useAuth()
-  const { theme, toggle } = useTheme()
   const [open, setOpen] = useState(false)
   const ref = useRef(null)
   const navigate = useNavigate()
@@ -67,14 +65,6 @@ export default function ProfileMenu() {
             label="Broker"
             value={token ? 'Connected' : 'Connect'}
             onClick={() => go('/connect')}
-          />
-
-          {/* Theme toggle (keeps menu open) */}
-          <Row
-            icon={theme === 'dark' ? '🌙' : '☀️'}
-            label="Theme"
-            value={theme === 'dark' ? 'Dark' : 'Light'}
-            onClick={toggle}
           />
 
           {/* Demo mode toggle (keeps menu open) */}

@@ -18,17 +18,14 @@ import Alerts from './routes/Alerts'
 import Tax from './routes/Tax'
 import Rebalance from './routes/Rebalance'
 import Copilot from './routes/Copilot'
-import Markets from './routes/Markets'
 
 const NAV_LINKS = [
   { to: '/',          label: 'Portfolio', icon: '📊' },
-  { to: '/markets',   label: 'Markets',   icon: '🌐' },
   { to: '/live',      label: 'Live',      icon: '📡' },
   { to: '/ledger',    label: 'Ledger',    icon: '🧾' },
   { to: '/tax',       label: 'Tax',       icon: '🧮' },
   { to: '/rebalance', label: 'Rebalance', icon: '⚖️' },
   { to: '/alerts',    label: 'Alerts',    icon: '🔔' },
-  { to: '/copilot',   label: 'Copilot',   icon: '🤖' },
 ]
 
 function NavTab({ to, children, onClick }) {
@@ -158,9 +155,8 @@ export default function App() {
           <Routes>
             <Route
               path="/"
-              element={provider === 'alphavantage' ? <Navigate to="/markets" replace /> : <PortfolioDashboard />}
+              element={provider === 'alphavantage' ? <Navigate to="/live" replace /> : <PortfolioDashboard />}
             />
-            <Route path="/markets"          element={<Markets />} />
             <Route path="/copilot"          element={<Copilot />} />
             <Route path="/ledger"           element={<Ledger />} />
             <Route path="/tax"              element={<Tax />} />
