@@ -1,7 +1,9 @@
 // Derives a live holdings list from the user's ledger transactions.
 // Computes open positions (weighted avg cost) and enriches with Yahoo Finance quotes.
+// Phase 6: split adjustments are applied in-memory so P&L aligns with Yahoo's adjusted prices.
 import { listTransactions } from './ledger.js'
 import * as yahoo from './marketdata/yahoo.js'
+import { syncSplits, getSplitsForSymbols, applySplitAdjustments } from './corporateActions.js'
 
 // Try Yahoo Finance symbol formats: NSE for India, bare for US.
 // Falls back through .BO and bare symbol.
@@ -26,9 +28,21 @@ async function fetchLiveQuote(symbol, country) {
 }
 
 export async function getDerivedHoldings(userId) {
-  const txns = await listTransactions(userId)
+  let txns = await listTransactions(userId)
   console.log(`[holdings] userId=${userId} txns=${txns.length}`)
   if (!txns.length) return []
+
+  // Phase 6: sync + apply split adjustments so cost-basis aligns with Yahoo adjusted prices.
+  const allSymbols = [...new Set(txns.map((t) => t.symbol.toUpperCase()))]
+  await Promise.allSettled(
+    allSymbols.map((sym) => {
+      const country = txns.find((t) => t.symbol.toUpperCase() === sym)?.country || 'IN'
+      const yahooSym = country === 'IN' ? `${sym}.NS` : sym
+      return syncSplits(sym, yahooSym)
+    }),
+  )
+  const splitsMap = await getSplitsForSymbols(allSymbols)
+  txns = applySplitAdjustments(txns, splitsMap)
 
   // Weighted average cost per symbol — track running qty and cost basis
   const positions = {}

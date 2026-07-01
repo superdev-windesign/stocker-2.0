@@ -30,8 +30,8 @@ export default function RecentTransactions() {
           return (
             <li
               key={t.id}
-              onClick={() => sid && navigate(`/stock/${sid}`)}
-              className={`flex items-center justify-between py-2 ${sid ? 'cursor-pointer hover:bg-slate-50 dark:hover:bg-white/5' : ''}`}
+              onClick={() => navigate(sid ? `/stock/${sid}` : `/stock/sym/${encodeURIComponent(t.symbol)}`)}
+              className="flex cursor-pointer items-center justify-between py-2 hover:bg-slate-50 dark:hover:bg-white/5"
             >
               <div className="flex items-center gap-2">
                 <span className={`h-6 w-6 shrink-0 rounded-full text-center text-[10px] font-bold leading-6 text-white ${buy ? 'bg-up' : 'bg-down'}`}>

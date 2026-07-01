@@ -2,6 +2,7 @@
 // prices. Gives an instant, real value/invested history (no waiting for EOD snapshots).
 import { listTransactions } from './ledger.js'
 import * as yahoo from './marketdata/yahoo.js'
+import { syncSplits, getSplitsForSymbols, applySplitAdjustments } from './corporateActions.js'
 
 const ymd = (sec) => new Date(sec * 1000).toISOString().slice(0, 10)
 
@@ -16,14 +17,7 @@ const RANGE = {
   'max': { interval: '1wk', range: 'max' },
 }
 
-const cache = new Map()
-async function memo(key, ttlMs, fn) {
-  const hit = cache.get(key)
-  if (hit && hit.exp > Date.now()) return hit.val
-  const val = await fn()
-  cache.set(key, { exp: Date.now() + ttlMs, val })
-  return val
-}
+import { memo } from './cache.js'
 
 export function getPortfolioHistory(userId, range = '1y', country = null) {
   const cfg = RANGE[range] || RANGE['1y']
@@ -32,6 +26,17 @@ export function getPortfolioHistory(userId, range = '1y', country = null) {
     let txns = await listTransactions(userId)
     if (country) txns = txns.filter((t) => (t.country || 'IN') === country)
     if (!txns.length) return { series: [], currency: country === 'US' ? 'USD' : 'INR' }
+
+    // Phase 6: apply split adjustments so historical cost-basis aligns with Yahoo adjusted prices.
+    const allSymbols = [...new Set(txns.map((t) => t.symbol.toUpperCase()))]
+    await Promise.allSettled(
+      allSymbols.map((sym) => {
+        const c = txns.find((t) => t.symbol.toUpperCase() === sym)?.country || 'IN'
+        return syncSplits(sym, c === 'IN' ? `${sym}.NS` : sym)
+      }),
+    )
+    const splitsMap = await getSplitsForSymbols(allSymbols)
+    txns = applySplitAdjustments(txns, splitsMap)
 
     txns.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0))
     const firstDate = txns[0].date

@@ -73,7 +73,7 @@ export default function Tax() {
               {harvest.map((h) => (
                 <li
                   key={h.symbol}
-                  onClick={() => h.securityId && navigate(`/stock/${h.securityId}`)}
+                  onClick={() => navigate(h.securityId ? `/stock/${h.securityId}` : `/stock/sym/${encodeURIComponent(h.symbol)}`)}
                   className="flex cursor-pointer items-center justify-between py-2 hover:bg-slate-50 dark:hover:bg-white/5"
                 >
                   <span className="text-sm font-medium text-slate-900 dark:text-slate-100">{h.symbol}</span>
@@ -95,7 +95,7 @@ export default function Tax() {
             {ltReadiness.map((r, i) => (
               <li
                 key={`${r.symbol}-${i}`}
-                onClick={() => r.securityId && navigate(`/stock/${r.securityId}`)}
+                onClick={() => navigate(r.securityId ? `/stock/${r.securityId}` : `/stock/sym/${encodeURIComponent(r.symbol)}`)}
                 className="flex cursor-pointer items-center justify-between py-2 hover:bg-slate-50 dark:hover:bg-white/5"
               >
                 <div>

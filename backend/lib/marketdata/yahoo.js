@@ -11,15 +11,7 @@ const HEADERS = {
   'Origin': 'https://finance.yahoo.com',
 }
 
-// Tiny TTL cache (moves to Redis in Phase 4).
-const cache = new Map()
-async function memo(key, ttlMs, fn) {
-  const hit = cache.get(key)
-  if (hit && hit.exp > Date.now()) return hit.val
-  const val = await fn()
-  cache.set(key, { exp: Date.now() + ttlMs, val })
-  return val
-}
+import { memo } from '../cache.js'
 
 const num = (v) => (v == null || v === '' || Number.isNaN(Number(v)) ? null : Number(v))
 
@@ -70,12 +62,18 @@ async function chartQuote(symbol, crumbState) {
     throw e
   }
   const j = await resp.json()
-  const meta = j?.chart?.result?.[0]?.meta
+  const result = j?.chart?.result?.[0]
+  const meta = result?.meta
   if (!meta) {
     const errMsg = j?.chart?.error?.description || `No data for ${symbol}`
     const e = new Error(errMsg)
     e.status = 404
     throw e
+  }
+  // Attach first candle's open as fallback for when regularMarketOpen is absent (after-hours)
+  const firstOpen = result?.indicators?.quote?.[0]?.open?.find((v) => v != null)
+  if (firstOpen != null && meta.regularMarketOpen == null) {
+    meta._firstCandleOpen = firstOpen
   }
   return meta
 }
@@ -106,7 +104,7 @@ function metaToQuote(meta, symbol) {
     prevClose: num(prevClose),
     change:    change != null ? Math.round(change * 100) / 100 : null,
     changePct: changePct != null ? Math.round(changePct * 1000) / 1000 : null,
-    open:      num(meta.regularMarketOpen),
+    open:      num(meta.regularMarketOpen ?? meta._firstCandleOpen),
     high:      num(meta.regularMarketDayHigh),
     low:       num(meta.regularMarketDayLow),
     volume:    num(meta.regularMarketVolume),
@@ -330,6 +328,39 @@ export const usQuotes = () =>
   memo('us-quotes', 60_000, async () => {
     const results = await Promise.allSettled(US_UNIVERSE.map((s) => quote(s).then((q) => ({ ...q, nsSymbol: s }))))
     return results.filter((r) => r.status === 'fulfilled').map((r) => r.value)
+  })
+
+// ── Stock split history ──────────────────────────────────────────────────────
+async function doSplits(symbol, crumbState) {
+  const url = `${CHART_BASE}/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1d&range=max&events=split&crumb=${encodeURIComponent(crumbState.crumb)}`
+  const resp = await fetch(url, { headers: { ...HEADERS, Cookie: crumbState.cookie } })
+  if (resp.status === 401 || resp.status === 403) {
+    const e = new Error(`Yahoo Finance auth error ${resp.status}`); e.status = resp.status; throw e
+  }
+  const j = await resp.json()
+  const result = j?.chart?.result?.[0]
+  if (!result) return []
+  const splitEvents = result.events?.splits || {}
+  return Object.values(splitEvents)
+    .map((s) => ({
+      date: new Date(s.date * 1000).toISOString().slice(0, 10),
+      ratio: s.numerator / s.denominator,   // e.g. 10 for a 10:1 split
+      label: `${s.numerator}:${s.denominator}`,
+    }))
+    .sort((a, b) => a.date.localeCompare(b.date))
+}
+
+export const splits = (symbol) =>
+  memo(`ysplits:${symbol}`, 24 * 3600_000, async () => {
+    let state = await getCrumb()
+    try { return await doSplits(symbol, state) }
+    catch (err) {
+      if (err.status === 401 || err.status === 403) {
+        state = await getCrumb(true)
+        return await doSplits(symbol, state)
+      }
+      throw err
+    }
   })
 
 // ── Sentiment derived from index performance ─────────────────────────────────

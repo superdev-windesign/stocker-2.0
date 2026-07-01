@@ -18,14 +18,7 @@ function sentiment(title) {
   return s > 0 ? 'positive' : s < 0 ? 'negative' : 'neutral'
 }
 
-const cache = new Map()
-async function memo(key, ttlMs, fn) {
-  const hit = cache.get(key)
-  if (hit && hit.exp > Date.now()) return hit.val
-  const val = await fn()
-  cache.set(key, { exp: Date.now() + ttlMs, val })
-  return val
-}
+import { memo } from './cache.js'
 
 export function getPortfolioNews(userId, country = null) {
   return memo(`pnews:${userId}${country ? `:${country}` : ''}`, 5 * 60_000, async () => {

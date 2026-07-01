@@ -7,15 +7,7 @@ const BASE = 'https://www.alphavantage.co/query'
 
 export const isConfigured = () => Boolean(API_KEY)
 
-// Tiny TTL cache (process-memory). For multi-instance/scale this moves to Redis.
-const cache = new Map()
-async function memo(key, ttlMs, fn) {
-  const hit = cache.get(key)
-  if (hit && hit.exp > Date.now()) return hit.val
-  const val = await fn()
-  cache.set(key, { exp: Date.now() + ttlMs, val })
-  return val
-}
+import { memo } from '../cache.js'
 
 async function av(params) {
   if (!API_KEY) {

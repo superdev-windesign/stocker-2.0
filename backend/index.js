@@ -2,6 +2,8 @@
 // Phase 1: email/password auth via JWT httpOnly cookie; all /api/* routes require userId.
 
 import 'dotenv/config'
+import { getRedis } from './lib/redis.js'
+getRedis() // establish connection eagerly so workers and cache are ready
 import express from 'express'
 import cors from 'cors'
 import cookieParser from 'cookie-parser'
@@ -43,6 +45,7 @@ import { getDerivedHoldings } from './lib/holdings.js'
 import { getPortfolioHistory } from './lib/portfolioHistory.js'
 import { getPortfolioNews } from './lib/portfolioNews.js'
 import { listWatchlists, createWatchlist, deleteWatchlist, addItem, removeItem, ensureWatchlistTables } from './lib/watchlists.js'
+import { listSplits, syncAllHeldSymbols } from './lib/corporateActions.js'
 
 const PORT = Number(process.env.PORT || 5174)
 const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:5173'
@@ -207,6 +210,7 @@ app.delete('/api/transactions',               ledgerHandler(async (req) => { awa
 app.get('/api/nav', ledgerHandler((req) => listSnapshots(req.userId)))
 app.get('/api/portfolio/history', ledgerHandler((req) => getPortfolioHistory(req.userId, String(req.query.range || '1y'), req.query.country || null)))
 app.get('/api/portfolio/news', ledgerHandler((req) => getPortfolioNews(req.userId, req.query.country || null)))
+app.get('/api/portfolio/splits', ledgerHandler(() => listSplits()))
 
 // ── INDmoney / INDstocks provider ─────────────────────────────────────────────
 const indmoneyHandler = (fn) => async (req, res) => {
@@ -317,6 +321,8 @@ Promise.all([ensureBrokerAccountsTable(), ensureWatchlistTables()]).then(() => {
   app.listen(PORT, () => {
     console.log(`\n[stocker] backend running on http://localhost:${PORT}`)
     startScheduler()
+    // Sync corporate actions on boot (fire-and-forget; Redis TTL prevents re-sync within 24h)
+    syncAllHeldSymbols().catch((err) => console.warn('[stocker] corp-action boot sync:', err.message))
   })
 }).catch((err) => {
   console.error('[stocker] DB init failed:', err.message)
