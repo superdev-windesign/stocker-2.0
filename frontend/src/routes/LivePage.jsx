@@ -183,7 +183,7 @@ function MoverColumn({ title, rows, cur, onPick }) {
 }
 
 // ── Search bar ────────────────────────────────────────────────────────────────
-function SearchBar({ onPick }) {
+function SearchBar({ onPick, region = 'IN' }) {
   const [q, setQ] = useState('')
   const [results, setResults] = useState([])
   const [open, setOpen] = useState(false)
@@ -220,7 +220,7 @@ function SearchBar({ onPick }) {
       {open && results.length > 0 && (
         <div className="absolute top-full z-50 mt-1 w-full overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xl dark:border-white/10 dark:bg-slate-900">
           {results.slice(0, 8).map((r) => (
-            <button key={r.symbol} onClick={() => { setQ(''); setOpen(false); onPick(r.symbol.replace(/\.(NS|BO|BSE)$/i, '')) }}
+            <button key={r.symbol} onClick={() => { setQ(''); setOpen(false); onPick(r.symbol.replace(/\.(NS|BO|BSE)$/i, ''), region) }}
               className="flex w-full items-center justify-between px-4 py-3 text-left hover:bg-slate-50 dark:hover:bg-white/5">
               <span className="font-semibold text-slate-900 dark:text-slate-100">{r.symbol}</span>
               <span className="ml-2 truncate text-xs text-slate-400">{r.name} · {r.region}</span>
@@ -269,7 +269,7 @@ export default function LivePage() {
     return () => clearInterval(id)
   }, [region, load])
 
-  const goStock = (sym) => navigate(`/stock/sym/${encodeURIComponent(sym)}${region === 'US' ? '?mkt=US' : ''}`)
+  const goStock = (sym, rgn = region) => navigate(`/stock/sym/${encodeURIComponent(sym)}${rgn === 'US' ? '?mkt=US' : ''}`)
   const goIndex = (yahooSymbol, rgn = region) => navigate(`/stock/sym/${encodeURIComponent(yahooSymbol)}?type=index&mkt=${rgn}`)
   const goItem = (it) => {
     if (it.type === 'index') return goIndex(it.yahooSymbol || it.symbol, it.country || 'IN')
@@ -322,7 +322,7 @@ export default function LivePage() {
               {updated && <span className="hidden text-xs text-slate-400 sm:inline">{updated.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}</span>}
             </div>
           </div>
-          <SearchBar onPick={goStock} />
+          <SearchBar onPick={goStock} region={region} />
         </div>
 
         {/* Region tabs */}
